@@ -1,4 +1,11 @@
 # PavoVival
+Final Project For Object-Oriented Programming (261200)
+
+w/a/d : left/right/jump
+f : shoot
+p : pause
+
+GroupSix:Lumi_Saw_Shiro
 
 A [libGDX](https://libgdx.com/) project generated with [gdx-liftoff](https://github.com/libgdx/gdx-liftoff).
 
