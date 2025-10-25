@@ -17,6 +17,8 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { Send } from "lucide-react"; // or replace with text "Send"
+import { storage } from "../firebase";
+import { getDownloadURL, ref as sref, uploadBytes } from "firebase/storage";
 
 // helpers
 const chatIdFor = (a, b) => [a, b].sort().join("_");
@@ -48,6 +50,12 @@ export default function ChatPage() {
 
   // typing
   const [isOtherTyping, setIsOtherTyping] = useState(false);
+
+  //File
+  const [pendingImage, setPendingImage] = useState(null);
+
+  //obj url preview
+  const [pendingURL, setPendingURL] = useState("");
 
   // load users (exclude me)
   useEffect(() => {
@@ -180,6 +188,30 @@ export default function ChatPage() {
     });
   }
 
+  async function handleSendImage(file) {
+  if (!file || !activeChatId || !user) return;
+
+  // 1) upload file to Storage
+  const path = `chats/${activeChatId}/${user.uid}/${Date.now()}_${file.name}`;
+  const r = sref(storage, path);
+  await uploadBytes(r, file);
+  const url = await getDownloadURL(r);
+
+  // 2) create a message that has imageUrl
+  await addDoc(collection(db, "chats", activeChatId, "messages"), {
+    senderId: user.uid,
+    imageUrl: url,
+    createdAt: serverTimestamp(),
+    seenBy: [user.uid],
+  });
+
+  // 3) update chat preview
+  await updateDoc(doc(db, "chats", activeChatId), {
+    lastMessage: "Photo",
+    lastMessageAt: serverTimestamp(),
+  });
+}
+
   // debounced stop typing
   const debouncedStopTyping = useMemo(
     () =>
@@ -273,7 +305,12 @@ export default function ChatPage() {
                           : "bg-[#F5F5F5] text-[#8B6F47]"
                       }`}
                     >
-                      <p>{msg.text}</p>
+                      {msg.imageUrl ? (
+                        <img src={msg.imageUrl} alt="sent" className="rounded-lg max-w-full" />
+                      ) : (
+                        <p>{msg.text}</p>
+                      )}
+
                       <span className="text-xs opacity-70 mt-1 block">
                         {formatTime(msg._ts)}
                       </span>
@@ -292,7 +329,40 @@ export default function ChatPage() {
               )}
               <div ref={messagesEndRef} />
             </div>
-
+            {pendingImage && (
+  <div className="px-4 pt-3 pb-2 border-t border-[#E2B887]/30 bg-[#FFF8EF] flex items-center gap-3">
+    <img
+      src={pendingURL}
+      alt="preview"
+      className="w-16 h-16 rounded-lg object-cover border"
+    />
+    
+    <div className="flex-1 text-[#8B6F47] text-sm">
+      {pendingImage.name} • {(pendingImage.size / 1024).toFixed(0)} KB
+    </div>
+    <button
+      onClick={async () => {
+        const f = pendingImage;
+        setPendingImage(null);
+        setPendingURL("");
+        await handleSendImage(f);
+      }}
+      className="px-3 py-2 bg-[#E2B887] text-white rounded-lg hover:bg-[#D4A77C]"
+    >
+      Send photo
+    </button>
+    <button
+      onClick={() => {
+        if (pendingURL) URL.revokeObjectURL(pendingURL);
+        setPendingImage(null);
+        setPendingURL("");
+      }}
+      className="px-3 py-2 border border-[#E2B887]/60 rounded-lg text-[#8B6F47] hover:bg-[#FFF1DF]"
+    >
+      Cancel
+    </button>
+  </div>
+)}
             <form
               onSubmit={handleSendMessage}
               className="p-4 border-t border-[#E2B887]/30 flex items-center space-x-3"
@@ -312,6 +382,26 @@ export default function ChatPage() {
                 placeholder="Type a message..."
                 className="flex-1 p-3 border border-[#E2B887]/50 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#E2B887] text-[#8B6F47] placeholder-[#8B6F47]/50"
               />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                const f = e.target.files?.[0];
+                  if (!f) return;
+                    setPendingImage(f);
+               const url = URL.createObjectURL(f);
+                    setPendingURL(url);
+                }}
+                className="hidden"
+                id="chat-upload"
+               />
+              <label
+                htmlFor="chat-upload"
+                className="cursor-pointer bg-[#FFE7CC] text-[#8B6F47] px-3 py-3 rounded-full border border-[#E2B887]/60"
+                itle="Send photo"
+              >
+              📷
+              </label>
               <button
                 type="submit"
                 className="bg-[#E2B887] text-white p-3 rounded-full hover:bg-[#D4A77C] transition-colors"
