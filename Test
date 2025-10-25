@@ -16,9 +16,9 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { Send } from "lucide-react"; // If this errors, remove and use text "Send"
+import { Send } from "lucide-react"; // or replace with text "Send"
 
-// ---------- helpers ----------
+// helpers
 const chatIdFor = (a, b) => [a, b].sort().join("_");
 const debounce = (fn, ms = 600) => {
   let t;
@@ -27,26 +27,29 @@ const debounce = (fn, ms = 600) => {
     t = setTimeout(() => fn(...args), ms);
   };
 };
+// format time WITHOUT seconds
+const formatTime = (d) =>
+  d ? new Date(d).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
 
 export default function ChatPage() {
   const { user } = useAuth();
 
-  // Left pane (users)
+  // left list
   const [allUsers, setAllUsers] = useState([]);
 
-  // Selection
+  // selection
   const [selectedChatUser, setSelectedChatUser] = useState(null);
   const [activeChatId, setActiveChatId] = useState(null);
 
-  // Messages
+  // messages
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const messagesEndRef = useRef(null);
 
-  // Typing
+  // typing
   const [isOtherTyping, setIsOtherTyping] = useState(false);
 
-  // ---------- load users (exclude me) ----------
+  // load users (exclude me)
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -58,7 +61,7 @@ export default function ChatPage() {
     })();
   }, [user]);
 
-  // ---------- create/open chat ----------
+  // ensure chat + open
   async function openChatWith(other) {
     if (!user || !other?.uid) return;
 
@@ -66,7 +69,6 @@ export default function ChatPage() {
     setSelectedChatUser(other);
     setActiveChatId(id);
 
-    // Ensure chat doc exists
     await setDoc(
       doc(db, "chats", id),
       {
@@ -78,11 +80,11 @@ export default function ChatPage() {
       { merge: true }
     );
 
-    // Mark existing messages as seen (fire & forget)
+    // mark seen immediately
     markSeen(id, user.uid).catch(() => {});
   }
 
-  // ---------- live messages for active chat ----------
+  // live messages
   useEffect(() => {
     if (!activeChatId) return;
 
@@ -103,12 +105,12 @@ export default function ChatPage() {
       });
       setMessages(rows);
 
-      // scroll to bottom
+      // scroll
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
       }, 0);
 
-      // mark as seen
+      // mark seen
       if (activeChatId && user) {
         markSeen(activeChatId, user.uid).catch(() => {});
       }
@@ -117,27 +119,30 @@ export default function ChatPage() {
     return unsub;
   }, [activeChatId, user]);
 
-  // ---------- listen to typing on chat doc ----------
+  // listen to typing map on chat doc (anyone except me)
   useEffect(() => {
-    if (!activeChatId || !selectedChatUser) return;
+    if (!activeChatId || !user) return;
     const chatRef = doc(db, "chats", activeChatId);
     const unsub = onSnapshot(chatRef, (snap) => {
-      const t = snap.data()?.typing || {};
-      setIsOtherTyping(!!t[selectedChatUser.uid]);
+      const typing = snap.data()?.typing || {};
+      const otherTyping = Object.keys(typing).some(
+        (uid) => uid !== user.uid && typing[uid] === true
+      );
+      setIsOtherTyping(otherTyping);
     });
     return unsub;
-  }, [activeChatId, selectedChatUser]);
+  }, [activeChatId, user]);
 
-  // ---------- seen receipts helper ----------
+  // seen receipts
   async function markSeen(chatId, myUid) {
-    // Get messages from the other user; add myUid to seenBy if missing
     const msgsQ = query(
       collection(db, "chats", chatId, "messages"),
       where("senderId", "!=", myUid)
     );
     const snap = await getDocs(msgsQ);
-    const batch = writeBatch(db);
+    if (snap.empty) return;
 
+    const batch = writeBatch(db);
     snap.forEach((d) => {
       const data = d.data();
       const seenBy = Array.isArray(data.seenBy) ? data.seenBy : [];
@@ -145,11 +150,10 @@ export default function ChatPage() {
         batch.update(d.ref, { seenBy: [...seenBy, myUid] });
       }
     });
-
-    if (!snap.empty) await batch.commit();
+    await batch.commit();
   }
 
-  // ---------- send message ----------
+  // send message
   async function handleSendMessage(e) {
     e?.preventDefault?.();
     if (!newMessage.trim() || !activeChatId || !user) return;
@@ -157,7 +161,7 @@ export default function ChatPage() {
     const text = newMessage.trim();
     setNewMessage("");
 
-    // stop typing immediately
+    // stop typing
     updateDoc(doc(db, "chats", activeChatId), {
       [`typing.${user.uid}`]: false,
     }).catch(() => {});
@@ -170,14 +174,13 @@ export default function ChatPage() {
       seenBy: [user.uid],
     });
 
-    // update chat preview
     await updateDoc(doc(db, "chats", activeChatId), {
       lastMessage: text,
       lastMessageAt: serverTimestamp(),
     });
   }
 
-  // ---------- typing announce (debounced stop) ----------
+  // debounced stop typing
   const debouncedStopTyping = useMemo(
     () =>
       debounce(() => {
@@ -190,10 +193,10 @@ export default function ChatPage() {
     [activeChatId, user]
   );
 
-  // ---------------- UI ----------------
+  // UI
   return (
     <div className="flex h-[calc(100vh-80px)] bg-white rounded-2xl shadow overflow-hidden">
-      {/* Left Pane: user list */}
+      {/* Left: users */}
       <div className="w-1/3 border-r border-[#E2B887]/30 p-4 overflow-y-auto">
         <h2 className="text-lg font-bold text-[#8B6F47] mb-3">Messages</h2>
         {allUsers.length === 0 ? (
@@ -226,7 +229,7 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Right Pane: Chat Window */}
+      {/* Right: chat window */}
       <div className="w-2/3 flex flex-col">
         {selectedChatUser ? (
           <>
@@ -272,10 +275,10 @@ export default function ChatPage() {
                     >
                       <p>{msg.text}</p>
                       <span className="text-xs opacity-70 mt-1 block">
-                        {msg._ts ? new Date(msg._ts).toLocaleTimeString() : ""}
+                        {formatTime(msg._ts)}
                       </span>
 
-                      {/* Seen indicator (only on my messages & when other has viewed) */}
+                      {/* Seen indicator (my messages only) */}
                       {msg.senderId === user.uid &&
                         Array.isArray(msg.seenBy) &&
                         msg.seenBy.length > 1 && (
