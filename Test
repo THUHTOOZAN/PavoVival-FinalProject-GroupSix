@@ -16,7 +16,7 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { Send } from "lucide-react"; // or replace with text "Send"
+import { Send } from "lucide-react";
 import { storage } from "../firebase";
 import { getDownloadURL, ref as sref, uploadBytes } from "firebase/storage";
 
@@ -29,32 +29,22 @@ const debounce = (fn, ms = 600) => {
     t = setTimeout(() => fn(...args), ms);
   };
 };
-// format time WITHOUT seconds
 const formatTime = (d) =>
   d ? new Date(d).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
 
 export default function ChatPage() {
   const { user } = useAuth();
 
-  // left list
   const [allUsers, setAllUsers] = useState([]);
-
-  // selection
   const [selectedChatUser, setSelectedChatUser] = useState(null);
   const [activeChatId, setActiveChatId] = useState(null);
-
-  // messages
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const messagesEndRef = useRef(null);
-
-  // typing
   const [isOtherTyping, setIsOtherTyping] = useState(false);
 
-  //File
+  // Image preview
   const [pendingImage, setPendingImage] = useState(null);
-
-  //obj url preview
   const [pendingURL, setPendingURL] = useState("");
 
   // load users (exclude me)
@@ -88,7 +78,6 @@ export default function ChatPage() {
       { merge: true }
     );
 
-    // mark seen immediately
     markSeen(id, user.uid).catch(() => {});
   }
 
@@ -113,12 +102,10 @@ export default function ChatPage() {
       });
       setMessages(rows);
 
-      // scroll
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
       }, 0);
 
-      // mark seen
       if (activeChatId && user) {
         markSeen(activeChatId, user.uid).catch(() => {});
       }
@@ -127,7 +114,7 @@ export default function ChatPage() {
     return unsub;
   }, [activeChatId, user]);
 
-  // listen to typing map on chat doc (anyone except me)
+  // listen typing
   useEffect(() => {
     if (!activeChatId || !user) return;
     const chatRef = doc(db, "chats", activeChatId);
@@ -141,7 +128,7 @@ export default function ChatPage() {
     return unsub;
   }, [activeChatId, user]);
 
-  // seen receipts
+  // mark seen
   async function markSeen(chatId, myUid) {
     const msgsQ = query(
       collection(db, "chats", chatId, "messages"),
@@ -161,7 +148,7 @@ export default function ChatPage() {
     await batch.commit();
   }
 
-  // send message
+  // send text
   async function handleSendMessage(e) {
     e?.preventDefault?.();
     if (!newMessage.trim() || !activeChatId || !user) return;
@@ -169,12 +156,10 @@ export default function ChatPage() {
     const text = newMessage.trim();
     setNewMessage("");
 
-    // stop typing
     updateDoc(doc(db, "chats", activeChatId), {
       [`typing.${user.uid}`]: false,
     }).catch(() => {});
 
-    // add message (include my uid in seenBy)
     await addDoc(collection(db, "chats", activeChatId, "messages"), {
       senderId: user.uid,
       text,
@@ -188,31 +173,28 @@ export default function ChatPage() {
     });
   }
 
+  // send image
   async function handleSendImage(file) {
-  if (!file || !activeChatId || !user) return;
+    if (!file || !activeChatId || !user) return;
 
-  // 1) upload file to Storage
-  const path = `chats/${activeChatId}/${user.uid}/${Date.now()}_${file.name}`;
-  const r = sref(storage, path);
-  await uploadBytes(r, file);
-  const url = await getDownloadURL(r);
+    const path = `chats/${activeChatId}/${user.uid}/${Date.now()}_${file.name}`;
+    const r = sref(storage, path);
+    await uploadBytes(r, file);
+    const url = await getDownloadURL(r);
 
-  // 2) create a message that has imageUrl
-  await addDoc(collection(db, "chats", activeChatId, "messages"), {
-    senderId: user.uid,
-    imageUrl: url,
-    createdAt: serverTimestamp(),
-    seenBy: [user.uid],
-  });
+    await addDoc(collection(db, "chats", activeChatId, "messages"), {
+      senderId: user.uid,
+      imageUrl: url,
+      createdAt: serverTimestamp(),
+      seenBy: [user.uid],
+    });
 
-  // 3) update chat preview
-  await updateDoc(doc(db, "chats", activeChatId), {
-    lastMessage: "Photo",
-    lastMessageAt: serverTimestamp(),
-  });
-}
+    await updateDoc(doc(db, "chats", activeChatId), {
+      lastMessage: "📷 Photo",
+      lastMessageAt: serverTimestamp(),
+    });
+  }
 
-  // debounced stop typing
   const debouncedStopTyping = useMemo(
     () =>
       debounce(() => {
@@ -225,10 +207,10 @@ export default function ChatPage() {
     [activeChatId, user]
   );
 
-  // UI
+  // render
   return (
     <div className="flex h-[calc(100vh-80px)] bg-white rounded-2xl shadow overflow-hidden">
-      {/* Left: users */}
+      {/* Left list */}
       <div className="w-1/3 border-r border-[#E2B887]/30 p-4 overflow-y-auto">
         <h2 className="text-lg font-bold text-[#8B6F47] mb-3">Messages</h2>
         {allUsers.length === 0 ? (
@@ -261,18 +243,14 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Right: chat window */}
+      {/* Right: chat */}
       <div className="w-2/3 flex flex-col">
         {selectedChatUser ? (
           <>
             <div className="bg-[#F5F5F5] p-4 border-b border-[#E2B887]/30 flex items-center space-x-3">
               <img
                 src={selectedChatUser.photoURL || "https://i.pravatar.cc/40?img=2"}
-                alt={
-                  selectedChatUser.displayName ||
-                  selectedChatUser.petName ||
-                  "user"
-                }
+                alt={selectedChatUser.displayName || selectedChatUser.petName || "user"}
                 className="w-10 h-10 rounded-full object-cover"
               />
               <h3 className="text-xl font-bold text-[#8B6F47]">
@@ -287,9 +265,7 @@ export default function ChatPage() {
 
             <div className="flex-1 p-4 overflow-y-auto space-y-4">
               {messages.length === 0 ? (
-                <p className="text-center text-[#8B6F47]/60">
-                  Start a conversation!
-                </p>
+                <p className="text-center text-[#8B6F47]/60">Start a conversation!</p>
               ) : (
                 messages.map((msg) => (
                   <div
@@ -306,7 +282,11 @@ export default function ChatPage() {
                       }`}
                     >
                       {msg.imageUrl ? (
-                        <img src={msg.imageUrl} alt="sent" className="rounded-lg max-w-full" />
+                        <img
+                          src={msg.imageUrl}
+                          alt="sent"
+                          className="rounded-lg w-full max-w-[200px] object-cover"
+                        />
                       ) : (
                         <p>{msg.text}</p>
                       )}
@@ -315,7 +295,6 @@ export default function ChatPage() {
                         {formatTime(msg._ts)}
                       </span>
 
-                      {/* Seen indicator (my messages only) */}
                       {msg.senderId === user.uid &&
                         Array.isArray(msg.seenBy) &&
                         msg.seenBy.length > 1 && (
@@ -329,40 +308,40 @@ export default function ChatPage() {
               )}
               <div ref={messagesEndRef} />
             </div>
+
             {pendingImage && (
-  <div className="px-4 pt-3 pb-2 border-t border-[#E2B887]/30 bg-[#FFF8EF] flex items-center gap-3">
-    <img
-      src={pendingURL}
-      alt="preview"
-      className="w-16 h-16 rounded-lg object-cover border"
-    />
-    
-    <div className="flex-1 text-[#8B6F47] text-sm">
-      {pendingImage.name} • {(pendingImage.size / 1024).toFixed(0)} KB
-    </div>
-    <button
-      onClick={async () => {
-        const f = pendingImage;
-        setPendingImage(null);
-        setPendingURL("");
-        await handleSendImage(f);
-      }}
-      className="px-3 py-2 bg-[#E2B887] text-white rounded-lg hover:bg-[#D4A77C]"
-    >
-      Send photo
-    </button>
-    <button
-      onClick={() => {
-        if (pendingURL) URL.revokeObjectURL(pendingURL);
-        setPendingImage(null);
-        setPendingURL("");
-      }}
-      className="px-3 py-2 border border-[#E2B887]/60 rounded-lg text-[#8B6F47] hover:bg-[#FFF1DF]"
-    >
-      Cancel
-    </button>
-  </div>
-)}
+              <div className="px-4 pt-3 pb-2 border-t border-[#E2B887]/30 bg-[#FFF8EF] flex items-center gap-3 justify-between">
+                <img
+                  src={pendingURL}
+                  alt="preview"
+                  className="w-20 h-20 rounded-lg object-cover border shadow-sm"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      const f = pendingImage;
+                      setPendingImage(null);
+                      setPendingURL("");
+                      await handleSendImage(f);
+                    }}
+                    className="px-4 py-2 bg-[#E2B887] text-white rounded-lg hover:bg-[#D4A77C]"
+                  >
+                    Send
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (pendingURL) URL.revokeObjectURL(pendingURL);
+                      setPendingImage(null);
+                      setPendingURL("");
+                    }}
+                    className="px-4 py-2 border border-[#E2B887]/60 rounded-lg text-[#8B6F47] hover:bg-[#FFF1DF]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             <form
               onSubmit={handleSendMessage}
               className="p-4 border-t border-[#E2B887]/30 flex items-center space-x-3"
@@ -386,21 +365,21 @@ export default function ChatPage() {
                 type="file"
                 accept="image/*"
                 onChange={(e) => {
-                const f = e.target.files?.[0];
+                  const f = e.target.files?.[0];
                   if (!f) return;
-                    setPendingImage(f);
-               const url = URL.createObjectURL(f);
-                    setPendingURL(url);
+                  setPendingImage(f);
+                  const url = URL.createObjectURL(f);
+                  setPendingURL(url);
                 }}
                 className="hidden"
                 id="chat-upload"
-               />
+              />
               <label
                 htmlFor="chat-upload"
                 className="cursor-pointer bg-[#FFE7CC] text-[#8B6F47] px-3 py-3 rounded-full border border-[#E2B887]/60"
-                itle="Send photo"
+                title="Send photo"
               >
-              📷
+                📷
               </label>
               <button
                 type="submit"
