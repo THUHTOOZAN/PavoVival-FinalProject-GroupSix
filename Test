@@ -1,3 +1,215 @@
+// src/pages/ProfilePage.js
+// ---------------------------------------------------------
+// Social-style Profile page
+// - Header with cover, avatar, name, email
+// - Stats row (Posts / Followers / Following)
+// - Posts grid (image or text cards).
+// ---------------------------------------------------------
+
+import React, { useEffect, useMemo, useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import { getUserPosts, getUserStats } from "../services/postApi";
+import { useNavigate } from "react-router-dom";
+
+export default function ProfilePage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  const [loading, setLoading] = useState(true);
+  const [posts, setPosts] = useState([]);
+  const [stats, setStats] = useState({
+    postsCount: 0,
+    followersCount: 0,
+    followingCount: 0,
+  });
+
+  // Lightbox for images
+  const [openImg, setOpenImg] = useState("");
+
+  // Basic guard
+  const displayName = user?.displayName || "Your name";
+  const avatar = user?.photoURL || "https://i.pravatar.cc/120?img=5";
+
+  const initials = useMemo(() => {
+    const n = displayName.trim();
+    if (!n) return "P";
+    const parts = n.split(" ");
+    return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
+  }, [displayName]);
+
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const [list, s] = await Promise.all([
+          getUserPosts(user.uid),
+          getUserStats(user.uid),
+        ]);
+        setPosts(list);
+        setStats(s);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [user]);
+
+  if (!user) {
+    return <div className="p-6">Please sign in.</div>;
+  }
+
+  return (
+    <div className="min-h-[calc(100vh-80px)] bg-[#FFE7CC]">
+      {/* Cover */}
+      <div className="h-36 md:h-44 bg-[linear-gradient(135deg,#E2B887_0%,#B5EAD7_100%)]" />
+
+      {/* Card */}
+      <div className="-mt-12 md:-mt-16 mx-auto max-w-4xl px-4">
+        <div className="bg-white rounded-2xl shadow p-5 md:p-6">
+          {/* Header row */}
+          <div className="flex items-center gap-4 md:gap-6">
+            <div className="relative">
+              <img
+                src={avatar}
+                alt={displayName}
+                className="w-20 h-20 md:w-24 md:h-24 rounded-full object-cover border-4 border-white shadow"
+              />
+              {/* fallback initials circle when avatar fails */}
+              {/* (optional) */}
+            </div>
+
+            <div className="flex-1">
+              <h1 className="text-xl md:text-2xl font-bold text-[#8B6F47]">
+                {displayName}
+              </h1>
+              <p className="text-gray-500 text-sm">{user.email}</p>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => navigate("/settings")}
+                className="px-4 py-2 rounded-xl border border-[#E2B887]/60 text-[#8B6F47] hover:bg-[#FFF4E6]"
+              >
+                Edit Profile
+              </button>
+              <button
+                onClick={() => navigate("/add")}
+                className="px-4 py-2 rounded-xl bg-[#E2B887] text-white hover:brightness-95"
+              >
+                + New Post
+              </button>
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="mt-6 grid grid-cols-3 divide-x divide-[#E2B887]/30 text-center">
+            <Stat label="Posts" value={stats.postsCount} />
+            <Stat label="Followers" value={stats.followersCount} />
+            <Stat label="Following" value={stats.followingCount} />
+          </div>
+        </div>
+      </div>
+
+      {/* Posts Grid */}
+      <div className="mx-auto max-w-4xl px-4 py-6">
+        <h2 className="text-lg font-semibold text-[#8B6F47] mb-3">
+          Posts
+        </h2>
+
+        {loading ? (
+          <SkeletonGrid />
+        ) : posts.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+            {posts.map((p) => (
+              <PostTile key={p.id} post={p} onOpenImage={setOpenImg} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Simple lightbox */}
+      {openImg && (
+        <div
+          onClick={() => setOpenImg("")}
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+        >
+          <img
+            src={openImg}
+            alt="post"
+            className="max-h-[90vh] max-w-[90vw] rounded-lg shadow-lg"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* === small presentational bits === */
+
+function Stat({ label, value }) {
+  return (
+    <div className="py-3">
+      <div className="text-xl font-bold text-[#8B6F47]">{value}</div>
+      <div className="text-xs uppercase tracking-wide text-[#8B6F47]/70">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="bg-white rounded-2xl shadow p-8 text-center text-[#8B6F47]/70">
+      No posts yet. Tap <span className="font-semibold">+ New Post</span> to publish your first!
+    </div>
+  );
+}
+
+function SkeletonGrid() {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div
+          key={i}
+          className="aspect-square rounded-xl bg-[#000]/5 animate-pulse"
+        />
+      ))}
+    </div>
+  );
+}
+
+function PostTile({ post, onOpenImage }) {
+  // image post
+  if (post.imageUrl) {
+    return (
+      <button
+        onClick={() => onOpenImage(post.imageUrl)}
+        className="aspect-square rounded-xl overflow-hidden bg-white shadow hover:shadow-md transition"
+      >
+        <img
+          src={post.imageUrl}
+          alt={post.text || "post"}
+          className="w-full h-full object-cover"
+        />
+      </button>
+    );
+  }
+
+  // text-only post
+  return (
+    <div className="aspect-square rounded-xl bg-white shadow p-4 flex items-center justify-center text-center">
+      <p className="text-[#8B6F47] line-clamp-5">{post.text}</p>
+    </div>
+  );
+}
+
+
+
+
+
+
+
 // src/pages/SettingsPage.js
 // -------------------------------------------------------------
 // SETTINGS PAGE (student-friendly version)
