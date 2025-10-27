@@ -1,3 +1,36 @@
+// src/pages/ProfilePage.js
+import React from "react";
+import { useAuth } from "../context/AuthContext";
+
+export default function ProfilePage() {
+  const { user } = useAuth();
+
+  if (!user) return <div className="p-6">Please sign in.</div>;
+
+  return (
+    <div className="max-w-2xl mx-auto p-6">
+      <div className="bg-white rounded-2xl shadow p-6 text-center">
+        <img
+          src={user.photoURL || "https://i.pravatar.cc/120?img=5"}
+          alt="avatar"
+          className="w-24 h-24 rounded-full object-cover mx-auto mb-3"
+        />
+        <h2 className="text-2xl font-bold text-[#8B6F47]">
+          {user.displayName || "No name yet"}
+        </h2>
+        <p className="text-sm text-gray-500">{user.email}</p>
+      </div>
+
+      {/* we’ll add “My posts” here later */}
+      <div className="mt-6 text-center text-[#8B6F47]/60">
+        Profile is live. We’ll add your posts here next. 🐾
+      </div>
+    </div>
+  );
+}
+
+
+
 async function onSave(e) {
   e?.preventDefault?.();
   if (!user) return;
