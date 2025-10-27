@@ -1,193 +1,3 @@
-// src/services/postApi.js
-import { db, storage } from "../firebase";
-import {
-  addDoc,
-  collection,
-  doc,
-  serverTimestamp,
-  setDoc,
-  getDoc,
-} from "firebase/firestore";
-import { getDownloadURL, ref as sref, uploadBytes } from "firebase/storage";
-
-/**
- * Upload one image file to Storage and return its public URL
- */
-async function uploadOneImage(file, uid, postId) {
-  const cleanName = file.name.replace(/\s+/g, "_");
-  const path = `posts/${postId}/${uid}_${Date.now()}_${cleanName}`;
-  const r = sref(storage, path);
-  await uploadBytes(r, file);
-  return await getDownloadURL(r);
-}
-
-/**
- * Create a post with multiple images (up to 10)
- * Returns the created postId
- */
-export async function createPost({ user, text, files }) {
-  if (!user) throw new Error("Not signed in");
-  const uid = user.uid;
-
-  // 1) Create a placeholder post to get its id
-  const postsCol = collection(db, "posts");
-  const tmp = await addDoc(postsCol, {
-    uid,
-    text: text || "",
-    images: [],
-    createdAt: serverTimestamp(),
-    likeCount: 0,
-    commentCount: 0,
-  });
-  const postId = tmp.id;
-
-  // 2) Upload images (cap at 10)
-  const chosen = Array.from(files || []).slice(0, 10);
-  const urls = [];
-  for (const f of chosen) {
-    const url = await uploadOneImage(f, uid, postId);
-    urls.push(url);
-  }
-
-  // 3) Patch post with image URLs
-  await setDoc(
-    doc(db, "posts", postId),
-    {
-      images: urls,
-      // keep createdAt from server
-    },
-    { merge: true }
-  );
-
-  // 4) Index it under the author for fast profile loading
-  await setDoc(
-    doc(db, "users", uid, "posts", postId),
-    { createdAt: serverTimestamp() },
-    { merge: true }
-  );
-
-  return postId;
-}
-
-/**
- * Convenience: read a post once by id
- */
-export async function getPostOnce(postId) {
-  const snap = await getDoc(doc(db, "posts", postId));
-  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
-}
-
-.......
-
-
-// src/pages/AddPostPage.js
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { createPost } from "../services/postApi";
-
-export default function AddPostPage() {
-  const { user } = useAuth();
-  const nav = useNavigate();
-
-  const [text, setText] = useState("");
-  const [files, setFiles] = useState([]);
-  const [previews, setPreviews] = useState([]);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  function onPick(e) {
-    const chosen = Array.from(e.target.files || []).slice(0, 10);
-    setFiles(chosen);
-    setPreviews(chosen.map((f) => URL.createObjectURL(f)));
-  }
-
-  async function onSubmit(e) {
-    e.preventDefault();
-    if (!user) return setErr("Please sign in.");
-    if (files.length === 0) return setErr("Pick at least one image.");
-
-    setErr("");
-    setBusy(true);
-    try {
-      await createPost({ user, text, files });
-      nav("/profile"); // jump to profile to see it in the grid
-    } catch (e2) {
-      console.error(e2);
-      setErr(e2.message || "Failed to post.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="min-h-[calc(100vh-80px)] flex justify-center p-6 bg-[#FFE7CC]">
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-xl bg-white/90 rounded-2xl shadow-lg p-6"
-      >
-        <h2 className="text-xl font-bold text-[#8B6F47] mb-4">Create Post</h2>
-
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={3}
-          placeholder="Say something about your pet…"
-          className="w-full mb-3 px-4 py-3 border-2 border-[#E2B887]/40 rounded-2xl focus:outline-none focus:border-[#E2B887] bg-white/80"
-        />
-
-        {/* Picker */}
-        <label
-          htmlFor="post-files"
-          className="inline-block mb-3 px-3 py-2 rounded-full border border-[#E2B887]/60 bg-[#FFE7CC] text-[#8B6F47] cursor-pointer"
-        >
-          Add images (max 10)
-        </label>
-        <input
-          id="post-files"
-          type="file"
-          accept="image/*"
-          multiple
-          hidden
-          onChange={onPick}
-        />
-
-        {/* Previews */}
-        {previews.length > 0 && (
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            {previews.map((src, i) => (
-              <div key={i} className="aspect-square overflow-hidden rounded-xl">
-                <img
-                  src={src}
-                  alt={`preview-${i}`}
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {err && (
-          <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-2xl px-4 py-2">
-            {err}
-          </div>
-        )}
-
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full bg-[#E2B887] text-white py-3 rounded-2xl font-semibold hover:brightness-95 transition disabled:opacity-50"
-        >
-          {busy ? "Posting…" : "Post"}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-.........
-
-
 // src/pages/ProfilePage.js
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -195,27 +5,20 @@ import { db } from "../firebase";
 import {
   collection,
   doc,
-  getDocs,
+  onSnapshot,
   orderBy,
   query,
+  where,
+  getDoc,
 } from "firebase/firestore";
 
-/**
- * Simple modal for viewing a post like IG
- */
+/* Lightweight modal to open a post */
 function PostModal({ post, onClose }) {
   if (!post) return null;
   return (
-    <div
-      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl p-4 w-[95vw] max-w-3xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex gap-4">
-          {/* Images carousel (very simple) */}
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-4 w-[95vw] max-w-3xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1">
             {post.images?.length ? (
               <img
@@ -227,15 +30,13 @@ function PostModal({ post, onClose }) {
               <div className="w-full aspect-square bg-gray-100 rounded-xl" />
             )}
           </div>
-          {/* Caption */}
-          <div className="w-64">
+          <div className="md:w-64">
             <h3 className="font-semibold text-[#8B6F47] mb-2">Caption</h3>
             <p className="text-sm text-[#8B6F47]/80 whitespace-pre-wrap">
               {post.text || "—"}
             </p>
           </div>
         </div>
-
         <button
           className="mt-4 px-4 py-2 rounded-xl bg-[#E2B887] text-white"
           onClick={onClose}
@@ -249,69 +50,44 @@ function PostModal({ post, onClose }) {
 
 export default function ProfilePage() {
   const { user } = useAuth();
-  const [profile, setProfile] = useState(null);
-  const [postIds, setPostIds] = useState([]);
-  const [posts, setPosts] = useState([]);
+  const [uDoc, setUDoc] = useState(null);     // {displayName, photoURL, bio}
+  const [posts, setPosts] = useState([]);     // my posts
   const [openPost, setOpenPost] = useState(null);
 
-  // derive display data
-  const displayName = useMemo(
-    () => profile?.displayName || user?.displayName || "Pet Lover",
-    [profile, user]
-  );
-  const photoURL = useMemo(
-    () => profile?.photoURL || user?.photoURL || "https://i.pravatar.cc/120?img=8",
-    [profile, user]
-  );
-
+  // Load my Firestore user doc once
   useEffect(() => {
     if (!user) return;
-
-    // read Firestore user doc for name/photo
     (async () => {
-      const snap = await getDocs(
-        query(collection(db, "users"), orderBy("createdAt", "desc"))
-      ); // not strictly needed — just ensuring users exists
-    })().catch(() => {});
-
-    // fetch my post index
-    (async () => {
-      const idxQ = query(
-        collection(db, "users", user.uid, "posts"),
-        orderBy("createdAt", "desc")
-      );
-      const idxSnap = await getDocs(idxQ);
-      setPostIds(idxSnap.docs.map((d) => d.id));
+      const snap = await getDoc(doc(db, "users", user.uid));
+      setUDoc(snap.exists() ? snap.data() : {});
     })();
   }, [user]);
 
-  // fetch full posts (shallow, once)
+  // Live query: all posts where uid == me (ordered by createdAt desc)
   useEffect(() => {
-    if (!postIds.length) {
-      setPosts([]);
-      return;
-    }
-    (async () => {
-      // fetch in small batches to avoid limits
-      const out = [];
-      for (const id of postIds) {
-        const r = await fetch(`/posts/${id}.json`); // placeholder to keep busy spinner happy if you want
-        // ^ ignore; we will actually get posts via Firestore on-demand below:
-      }
-    })();
-  }, [postIds]);
+    if (!user) return;
+    // NOTE: Firestore may ask you to create a composite index for (where+orderBy). Click the link it shows once and you're done.
+    const q = query(
+      collection(db, "posts"),
+      where("uid", "==", user.uid),
+      orderBy("createdAt", "desc")
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setPosts(rows);
+    });
+    return unsub;
+  }, [user]);
 
-  // Simplest: read each post individually (few posts = fine)
-  useEffect(() => {
-    (async () => {
-      const arr = [];
-      for (const id of postIds) {
-        const snap = await (await import("../services/postApi")).getPostOnce(id);
-        if (snap) arr.push(snap);
-      }
-      setPosts(arr);
-    })();
-  }, [postIds]);
+  const displayName = useMemo(
+    () => uDoc?.displayName || user?.displayName || "Pet Lover",
+    [uDoc, user]
+  );
+  const photoURL = useMemo(
+    () => uDoc?.photoURL || user?.photoURL || "https://i.pravatar.cc/120?img=8",
+    [uDoc, user]
+  );
+  const bio = uDoc?.bio || "";
 
   if (!user) {
     return (
@@ -323,7 +99,7 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-[calc(100vh-80px)] bg-[#FFE7CC]">
-      {/* header card */}
+      {/* Header card */}
       <div className="max-w-5xl mx-auto px-4 py-6">
         <div className="bg-white/90 rounded-2xl shadow p-6 flex items-center gap-6">
           <img
@@ -332,9 +108,10 @@ export default function ProfilePage() {
             className="w-24 h-24 rounded-full object-cover"
           />
           <div className="flex-1">
-            <div className="flex items-center gap-4">
+            {/* name + small buttons row */}
+            <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-2xl font-bold text-[#8B6F47]">{displayName}</h1>
-              {/* small actions */}
+
               <a
                 href="/add"
                 className="px-3 py-1 rounded-full text-sm bg-[#E2B887] text-white hover:brightness-95"
@@ -355,8 +132,8 @@ export default function ProfilePage() {
               </a>
             </div>
 
-            {/* stats row right under name */}
-            <div className="mt-2 flex gap-6 text-[#8B6F47]">
+            {/* stats directly under name */}
+            <div className="mt-1 flex gap-6 text-[#8B6F47]">
               <span>{posts.length} posts</span>
               <span>0 followers</span>
               <span>0 following</span>
@@ -364,14 +141,17 @@ export default function ProfilePage() {
 
             {/* bio */}
             <div className="mt-2 text-[#8B6F47]/80">
-              {/* You can store bio in users/{uid}.bio later */}
-              <a href="/settings" className="underline">Add bio</a>
+              {bio ? (
+                <p className="whitespace-pre-wrap">{bio}</p>
+              ) : (
+                <a href="/settings" className="underline">Add bio</a>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* grid */}
+      {/* Posts grid */}
       <div className="max-w-5xl mx-auto px-4 pb-12">
         {posts.length === 0 ? (
           <div className="text-center text-[#8B6F47]/70">No posts yet.</div>
@@ -382,7 +162,7 @@ export default function ProfilePage() {
                 key={p.id}
                 onClick={() => setOpenPost(p)}
                 className="aspect-square bg-white/70 rounded-2xl overflow-hidden hover:opacity-90"
-                title="Open"
+                title="Open post"
               >
                 {p.images?.[0] ? (
                   <img
@@ -403,6 +183,167 @@ export default function ProfilePage() {
     </div>
   );
 }
+……..
 
-.........
 
+// src/pages/SettingsPage.js
+import React, { useEffect, useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import { auth, db, storage } from "../firebase";
+import { updateProfile } from "firebase/auth";
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { ref as sref, uploadBytes, getDownloadURL } from "firebase/storage";
+
+export default function SettingsPage() {
+  const { user, logout } = useAuth();
+  const [petName, setPetName] = useState("");
+  const [email, setEmail] = useState("");
+  const [bio, setBio] = useState("");
+  const [photoURL, setPhotoURL] = useState("");
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState("");
+
+  useEffect(() => {
+    if (!user) return;
+    setEmail(user.email || "");
+    setPetName(user.displayName || "");
+    setPhotoURL(user.photoURL || "");
+
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "users", user.uid));
+        if (snap.exists()) {
+          const d = snap.data();
+          if (d.displayName) setPetName(d.displayName);
+          if (d.photoURL) setPhotoURL(d.photoURL);
+          if (d.bio) setBio(d.bio);
+        } else {
+          await setDoc(doc(db, "users", user.uid), {
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName || "",
+            photoURL: user.photoURL || "",
+            bio: "",
+            createdAt: serverTimestamp(),
+          });
+        }
+      } catch (e) {
+        console.warn("load settings failed:", e);
+      }
+    })();
+  }, [user]);
+
+  function onPick(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFile(f);
+    const url = URL.createObjectURL(f);
+    setPreview(url);
+  }
+
+  async function onSave(e) {
+    e?.preventDefault?.();
+    if (!user) return;
+    setSaving(true);
+    setError("");
+    setOk("");
+
+    try {
+      let newPhotoURL = photoURL;
+
+      if (file) {
+        const path = `profile/${user.uid}/avatar.jpg`;
+        const r = sref(storage, path);
+        await uploadBytes(r, file);
+        newPhotoURL = await getDownloadURL(r);
+      }
+
+      await updateProfile(auth.currentUser, {
+        displayName: petName || "",
+        photoURL: newPhotoURL || "",
+      });
+
+      await updateDoc(doc(db, "users", user.uid), {
+        displayName: petName || "",
+        photoURL: newPhotoURL || "",
+        bio: bio || "",
+        updatedAt: serverTimestamp(),
+      });
+
+      setPhotoURL(newPhotoURL);
+      setOk("Profile updated.");
+      setFile(null);
+      setPreview("");
+    } catch (e2) {
+      setError(e2.message || "Failed to update profile.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="min-h-[calc(100vh-80px)] flex items-start justify-center p-6 bg-[#FFE7CC]">
+      <form onSubmit={onSave} className="w-full max-w-md bg-white/90 rounded-2xl shadow-lg p-6">
+        <h2 className="text-2xl font-bold text-center mb-4">Settings</h2>
+
+        {/* Avatar */}
+        <div className="flex flex-col items-center mb-4">
+          <div className="w-24 h-24 rounded-full overflow-hidden bg-[#F5F5F5] border">
+            <img
+              src={preview || photoURL || "https://i.pravatar.cc/96?img=3"}
+              alt="avatar"
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <label
+            htmlFor="pick-avatar"
+            className="mt-3 px-3 py-1 rounded-full text-sm bg-[#FFE7CC] text-[#8B6F47] border border-[#E2B887]/60 cursor-pointer"
+          >
+            Change Photo
+          </label>
+          <input id="pick-avatar" type="file" accept="image/*" className="hidden" onChange={onPick} />
+        </div>
+
+        {/* Pet Name */}
+        <label className="block text-sm text-[#8B6F47] mb-1">Pet Name</label>
+        <input
+          value={petName}
+          onChange={(e) => setPetName(e.target.value)}
+          className="w-full px-4 py-3 border-2 border-orange-200 rounded-2xl focus:border-orange-400 focus:outline-none transition bg-white/80 backdrop-blur mb-3"
+          placeholder="Your pet's name"
+        />
+
+        {/* Email (read-only) */}
+        <label className="block text-sm text-[#8B6F47] mb-1">Email</label>
+        <input
+          value={email}
+          readOnly
+          className="w-full px-4 py-3 border-2 border-orange-100 rounded-2xl bg-gray-50 text-gray-500 mb-3"
+        />
+
+        {/* Bio */}
+        <label className="block text-sm text-[#8B6F47] mb-1">Bio</label>
+        <textarea
+          value={bio}
+          onChange={(e) => setBio(e.target.value)}
+          rows={3}
+          placeholder="Tell others about your pet…"
+          className="w-full mb-4 px-4 py-3 border-2 border-[#E2B887]/40 rounded-2xl focus:outline-none focus:border-[#E2B887] bg-white/80"
+        />
+
+        {error && <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-2xl px-4 py-2">{error}</div>}
+        {ok && <div className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-2xl px-4 py-2">{ok}</div>}
+
+        <button type="submit" disabled={saving} className="w-full bg-[#E2B887] text-white py-3 rounded-2xl font-semibold hover:brightness-95 transition disabled:opacity-50">
+          {saving ? "Saving..." : "Save Changes"}
+        </button>
+
+        <button type="button" onClick={logout} className="w-full mt-3 bg-red-500 text-white py-3 rounded-2xl font-semibold hover:brightness-95 transition">
+          Logout
+        </button>
+      </form>
+    </div>
+  );
