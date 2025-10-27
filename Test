@@ -1,8 +1,6 @@
 // src/pages/ProfilePage.js
-// Student-friendly, Instagram-style profile page.
-// - Shows avatar, display name, stats, and an Edit Profile button
-// - Hides email
-// - Renders a 3-column grid of your posts (first image as thumbnail)
+// Clean IG-style profile page with Bio (no email), good alignment,
+// and a robust grid that understands different post shapes.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -17,55 +15,63 @@ import {
   query,
 } from "firebase/firestore";
 
+// 👉 helper: find a thumbnail in many possible post shapes
+function getThumb(post) {
+  // prefer array of images
+  if (Array.isArray(post.images) && post.images[0]) return post.images[0];
+  // common single-image fields
+  if (post.imageUrl) return post.imageUrl;
+  if (post.photoURL) return post.photoURL;
+  if (post.thumbnail) return post.thumbnail;
+  return null;
+}
+
 export default function ProfilePage() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  // 🔹 profile info (from users/{uid})
-  const [me, setMe] = useState(null);
+  const [me, setMe] = useState(null);      // users/{uid}
+  const [posts, setPosts] = useState([]);  // full posts
 
-  // 🔹 my posts (full docs from posts/{postId})
-  const [posts, setPosts] = useState([]);
-
-  // 1) Load profile + posts
   useEffect(() => {
     if (!user) return;
 
     (async () => {
-      // profile
-      const s = await getDoc(doc(db, "users", user.uid));
-      setMe(
-        s.exists()
-          ? s.data()
-          : {
-              displayName: user.displayName || "My profile",
-              photoURL: user.photoURL || "",
-              // email intentionally not shown in the UI
-            }
-      );
+      // ---- Profile (Firestore is source of truth for displayName/photoURL/bio)
+      const userSnap = await getDoc(doc(db, "users", user.uid));
+      if (userSnap.exists()) {
+        setMe(userSnap.data());
+      } else {
+        // Fallback (shouldn’t happen because we create the doc on signup/settings)
+        setMe({
+          displayName: user.displayName || "My profile",
+          photoURL: user.photoURL || "",
+          bio: "",
+          followersCount: 0,
+          followingCount: 0,
+        });
+      }
 
-      // user post index -> fetch each post doc
+      // ---- Post index -> fetch full post docs
       const q = query(
         collection(db, "users", user.uid, "posts"),
         orderBy("createdAt", "desc")
       );
-      const indexSnap = await getDocs(q);
-      const ids = indexSnap.docs.map((d) => d.id);
+      const idxSnap = await getDocs(q);
+      const ids = idxSnap.docs.map((d) => d.id);
 
-      const docs = await Promise.all(ids.map((id) => getDoc(doc(db, "posts", id))));
-      const rows = docs
-        .filter((s) => s.exists())
-        .map((s) => ({ id: s.id, ...s.data() }));
-      setPosts(rows);
+      const fullDocs = await Promise.all(ids.map((id) => getDoc(doc(db, "posts", id))));
+      setPosts(
+        fullDocs.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() }))
+      );
     })();
   }, [user]);
 
-  // derived stats
   const stats = useMemo(
     () => ({
       posts: posts.length,
-      followers: me?.followersCount ?? 0, // placeholder if you add later
-      following: me?.followingCount ?? 0, // placeholder if you add later
+      followers: me?.followersCount ?? 0,
+      following: me?.followingCount ?? 0,
     }),
     [posts.length, me]
   );
@@ -74,26 +80,23 @@ export default function ProfilePage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      {/* ===== Header ===== */}
+      {/* ===== Header card ===== */}
       <section className="bg-white/90 rounded-2xl shadow p-6 md:p-8 mb-6">
-        <div className="flex items-center gap-6 md:gap-10">
+        <div className="flex items-start gap-6 md:gap-8">
           {/* avatar */}
-          <div className="shrink-0">
-            <img
-              src={me?.photoURL || "https://i.pravatar.cc/128?img=7"}
-              alt="avatar"
-              className="w-24 h-24 md:w-32 md:h-32 rounded-full object-cover ring-2 ring-[#E2B887]/50"
-            />
-          </div>
+          <img
+            src={me?.photoURL || "https://i.pravatar.cc/128?img=7"}
+            alt="avatar"
+            className="w-24 h-24 md:w-32 md:h-32 rounded-full object-cover ring-2 ring-[#E2B887]/50"
+          />
 
-          {/* name + actions */}
           <div className="flex-1">
+            {/* name + actions */}
             <div className="flex flex-col md:flex-row md:items-center md:gap-6">
-              <h1 className="text-2xl md:text-3xl font-bold text-[#8B6F47]">
+              <h1 className="text-2xl md:text-3xl font-bold text-[#8B6F47] leading-tight">
                 {me?.displayName || "Your profile"}
               </h1>
 
-              {/* actions */}
               <div className="mt-3 md:mt-0 flex gap-3">
                 <button
                   onClick={() => navigate("/settings")}
@@ -111,40 +114,31 @@ export default function ProfilePage() {
             </div>
 
             {/* stats */}
-            <ul className="mt-4 flex gap-8 text-[#8B6F47]">
-              <li>
-                <span className="font-semibold">{stats.posts}</span>{" "}
-                <span className="opacity-70">posts</span>
-              </li>
-              <li>
-                <span className="font-semibold">{stats.followers}</span>{" "}
-                <span className="opacity-70">followers</span>
-              </li>
-              <li>
-                <span className="font-semibold">{stats.following}</span>{" "}
-                <span className="opacity-70">following</span>
-              </li>
+            <ul className="mt-3 flex gap-8 text-[#8B6F47]">
+              <li><span className="font-semibold">{stats.posts}</span> <span className="opacity-70">posts</span></li>
+              <li><span className="font-semibold">{stats.followers}</span> <span className="opacity-70">followers</span></li>
+              <li><span className="font-semibold">{stats.following}</span> <span className="opacity-70">following</span></li>
             </ul>
 
-            {/* optional bio (add a "bio" field later if you want) */}
-            {me?.bio && (
-              <p className="mt-3 text-[#8B6F47]">{me.bio}</p>
-            )}
-          </div>
-        </div>
-
-        {/* tabs (only visual for now) */}
-        <div className="mt-6 border-t border-[#E2B887]/30 pt-4">
-          <div className="flex gap-6 text-sm">
-            <span className="font-semibold text-[#8B6F47]">Posts</span>
-            <span className="text-[#8B6F47]/50 cursor-not-allowed">
-              Tagged (soon)
-            </span>
+            {/* bio (no email shown) */}
+            <div className="mt-3 text-[#6f5a36]">
+              {me?.bio ? (
+                <p className="whitespace-pre-line">{me.bio}</p>
+              ) : (
+                <button
+                  onClick={() => navigate("/settings")}
+                  className="text-[#8B6F47] underline underline-offset-2"
+                  title="Add a short bio in Settings"
+                >
+                  Add a short bio →
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ===== Grid ===== */}
+      {/* ===== Posts grid ===== */}
       {posts.length === 0 ? (
         <div className="text-center text-[#8B6F47]/60">
           No posts yet. Use the <b>+</b> button to create one.
@@ -152,11 +146,7 @@ export default function ProfilePage() {
       ) : (
         <section className="grid grid-cols-3 gap-2 md:gap-4">
           {posts.map((p) => {
-            const thumb =
-              Array.isArray(p.images) && p.images.length > 0
-                ? p.images[0]
-                : null;
-
+            const thumb = getThumb(p);
             return (
               <div
                 key={p.id}
@@ -167,14 +157,15 @@ export default function ProfilePage() {
                   <img
                     src={thumb}
                     alt="post"
+                    loading="lazy"
                     className="w-full h-full object-cover hover:scale-105 transition-transform"
+                    onError={(e) => { e.currentTarget.style.opacity = 0.2; }}
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-[#8B6F47]/60 p-3 text-center">
                     {p.text?.slice(0, 40) || "Text post"}
                   </div>
                 )}
-                {/* You can add click-to-open modal here later */}
               </div>
             );
           })}
