@@ -1,44 +1,53 @@
-// src/services/postApi.js
-import { db, storage } from "../firebase";
+// src/dev/patchPostsOnce.js
+import { db } from "../firebase";
 import {
-  addDoc,
   collection,
-  serverTimestamp,
+  getDocs,
+  query,
+  where,
+  doc,
+  getDoc,
+  updateDoc,
 } from "firebase/firestore";
-import { ref as sref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 /**
- * createPost
- * @param {object} params
- * @param {string} params.uid - current user's uid
- * @param {string} params.displayName - current user's displayName (pet name)
- * @param {string} params.photoURL - current user's avatar
- * @param {string} params.text - caption
- * @param {File[]} params.files - images (0..10)
+ * Add {author:{displayName, photoURL}} to posts missing it
+ * for the current user.
  */
-export async function createPost({ uid, displayName, photoURL, text, files }) {
-  // 1) upload images to Storage
-  const urls = [];
-  for (const f of files || []) {
-    const path = `posts/${uid}/${Date.now()}_${f.name}`;
-    const r = sref(storage, path);
-    await uploadBytes(r, f);
-    urls.push(await getDownloadURL(r));
-  }
+export async function patchMyPosts(uid) {
+  if (!uid) return;
 
-  // 2) write Firestore document WITH author block
-  const docRef = await addDoc(collection(db, "posts"), {
-    uid,
-    text: text || "",
-    images: urls,
-    createdAt: serverTimestamp(),
-    likeCount: 0,
-    commentCount: 0,
-    author: {
-      displayName: displayName || "",
-      photoURL: photoURL || "",
-    },
+  // get user profile
+  const userSnap = await getDoc(doc(db, "users", uid));
+  const profile = userSnap.exists() ? userSnap.data() : {};
+  const displayName = profile.displayName || "";
+  const photoURL = profile.photoURL || "";
+
+  // find my posts missing author
+  const q = query(collection(db, "posts"), where("uid", "==", uid));
+  const snap = await getDocs(q);
+  const updates = [];
+  snap.forEach((d) => {
+    const p = d.data();
+    if (!p.author || !p.author.displayName) {
+      updates.push(updateDoc(d.ref, { author: { displayName, photoURL } }));
+    }
   });
 
-  return { id: docRef.id, images: urls };
+  await Promise.all(updates);
 }
+
+........
+
+// at the top
+import { patchMyPosts } from "../dev/patchPostsOnce";
+
+// inside a component where you have `user`:
+<button
+  onClick={() => patchMyPosts(user.uid)}
+  className="px-3 py-1 text-xs bg-[#FFE7CC] border rounded"
+>
+  Dev: Patch my posts
+</button>
+
+..... 
