@@ -12,15 +12,55 @@ import {
   query,
 } from "firebase/firestore";
 
-// Try many common shapes to find a thumbnail for a post
-function pickThumb(p) {
-  if (Array.isArray(p.images) && p.images[0]) return p.images[0];
-  if (Array.isArray(p.media) && p.media[0]?.url) return p.media[0].url;
-  if (p.imageUrl) return p.imageUrl;
-  if (p.image) return p.image;
-  if (p.photo) return p.photo;
-  if (p.thumbnail) return p.thumbnail;
+/* ---------- helpers: find an image URL in many possible shapes ---------- */
+const looksLikeImgUrl = (s) =>
+  typeof s === "string" &&
+  (s.startsWith("http") ||
+    s.startsWith("data:image") ||
+    s.startsWith("blob:")) &&
+  /\.(png|jpe?g|gif|webp|avif)(\?.*)?$/i.test(s);
+
+function firstUrlIn(val) {
+  if (!val) return null;
+  if (typeof val === "string" && looksLikeImgUrl(val)) return val;
+  if (Array.isArray(val)) {
+    for (const item of val) {
+      const u = firstUrlIn(item);
+      if (u) return u;
+    }
+  } else if (typeof val === "object") {
+    for (const v of Object.values(val)) {
+      const u = firstUrlIn(v);
+      if (u) return u;
+    }
+  }
   return null;
+}
+
+function pickThumb(p) {
+  // common flat fields
+  for (const k of [
+    "imageUrl",
+    "imageURL",
+    "image",
+    "photo",
+    "thumbnail",
+    "url",
+    "src",
+  ]) {
+    if (p[k] && looksLikeImgUrl(p[k])) return p[k];
+  }
+  // common arrays/objects
+  if (Array.isArray(p.images) && p.images.length) {
+    const u = firstUrlIn(p.images[0]);
+    if (u) return u;
+  }
+  if (Array.isArray(p.media) && p.media.length) {
+    const u = firstUrlIn(p.media[0]);
+    if (u) return u;
+  }
+  // last resort: scan whole object
+  return firstUrlIn(p);
 }
 
 export default function ProfilePage() {
@@ -73,7 +113,7 @@ export default function ProfilePage() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      {/* ===== Header card with right-side actions ===== */}
+      {/* ===== Header card ===== */}
       <section className="bg-white/90 rounded-2xl shadow p-6 md:p-8 mb-6">
         <div className="flex gap-6 md:gap-8">
           {/* avatar */}
@@ -83,44 +123,53 @@ export default function ProfilePage() {
             className="w-24 h-24 md:w-28 md:h-28 rounded-full object-cover ring-2 ring-[#E2B887]/50"
           />
 
-          {/* name, stats, bio */}
+          {/* name + stats + bio */}
           <div className="flex-1 min-w-0">
+            {/* name */}
             <div className="flex items-start justify-between gap-4">
-              <h1 className="text-2xl md:text-3xl font-bold text-[#8B6F47]">
-                {me?.displayName || "Your profile"}
-              </h1>
+              <div className="min-w-0">
+                <h1 className="text-2xl md:text-3xl font-bold text-[#8B6F47] truncate">
+                  {me?.displayName || "Your profile"}
+                </h1>
+                {/* stats directly under the name */}
+                <ul className="mt-2 flex gap-6 text-[#8B6F47]">
+                  <li>
+                    <span className="font-semibold">{stats.posts}</span>{" "}
+                    <span className="opacity-70">posts</span>
+                  </li>
+                  <li>
+                    <span className="font-semibold">{stats.followers}</span>{" "}
+                    <span className="opacity-70">followers</span>
+                  </li>
+                  <li>
+                    <span className="font-semibold">{stats.following}</span>{" "}
+                    <span className="opacity-70">following</span>
+                  </li>
+                </ul>
+              </div>
 
-              {/* Actions on the RIGHT (stack on desktop, row on mobile) */}
-              <div className="flex flex-col gap-2 items-stretch
-                              md:min-w-[180px] md:items-stretch
-                              sm:flex-row sm:gap-2 sm:items-center sm:justify-end md:flex-col">
+              {/* small buttons on the right */}
+              <div className="flex flex-col gap-2 items-stretch md:min-w-[160px] sm:flex-row sm:gap-2 md:flex-col">
                 <button
                   onClick={() => navigate("/add")}
-                  className="px-4 py-2 rounded-xl bg-[#E2B887] text-white hover:brightness-95"
+                  className="px-3 py-1.5 rounded-lg bg-[#E2B887] text-white text-sm hover:brightness-95"
                 >
-                  Create Post →
+                  Create post
                 </button>
                 <button
                   onClick={() => navigate("/chat")}
-                  className="px-4 py-2 rounded-xl bg-white text-[#8B6F47] border border-[#E2B887]/50 hover:bg-[#FFF8EF]"
+                  className="px-3 py-1.5 rounded-lg bg-white text-[#8B6F47] text-sm border border-[#E2B887]/50 hover:bg-[#FFF8EF]"
                 >
-                  Message →
+                  Message
                 </button>
                 <button
                   onClick={() => navigate("/settings")}
-                  className="px-4 py-2 rounded-xl bg-[#FFE7CC] text-[#8B6F47] border border-[#E2B887]/50 hover:bg-[#FFF2E1]"
+                  className="px-3 py-1.5 rounded-lg bg-[#FFE7CC] text-[#8B6F47] text-sm border border-[#E2B887]/50 hover:bg-[#FFF2E1]"
                 >
-                  Edit Profile →
+                  Edit profile
                 </button>
               </div>
             </div>
-
-            {/* stats */}
-            <ul className="mt-3 flex gap-8 text-[#8B6F47]">
-              <li><span className="font-semibold">{stats.posts}</span> <span className="opacity-70">posts</span></li>
-              <li><span className="font-semibold">{stats.followers}</span> <span className="opacity-70">followers</span></li>
-              <li><span className="font-semibold">{stats.following}</span> <span className="opacity-70">following</span></li>
-            </ul>
 
             {/* bio (no email) */}
             <div className="mt-3 text-[#6f5a36]">
@@ -132,7 +181,7 @@ export default function ProfilePage() {
                   className="text-[#8B6F47] underline underline-offset-2"
                   title="Add a short bio in Settings"
                 >
-                  Add short bio →
+                  Add short bio
                 </button>
               )}
             </div>
@@ -161,7 +210,9 @@ export default function ProfilePage() {
                     alt="post"
                     loading="lazy"
                     className="w-full h-full object-cover hover:scale-105 transition-transform"
-                    onError={(e) => { e.currentTarget.style.opacity = 0.2; }}
+                    onError={(e) => {
+                      e.currentTarget.style.opacity = 0.2;
+                    }}
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-[#8B6F47]/60 p-3 text-center">
@@ -176,8 +227,3 @@ export default function ProfilePage() {
     </div>
   );
 }
-
-.......
-
-
-
