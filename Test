@@ -1,3 +1,146 @@
+// src/pages/ProfilePage.js
+import React, { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { db } from "../firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { getUserPosts } from "../services/postApi";
+
+export default function ProfilePage() {
+  const { user } = useAuth();
+  const { uid: routeUid } = useParams();
+  const navigate = useNavigate();
+
+  const viewingUid = routeUid || user?.uid;
+  const isMe = user && viewingUid === user.uid;
+
+  const [profile, setProfile] = useState({
+    displayName: "",
+    email: "",
+    photoURL: "",
+  });
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!viewingUid) return;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "users", viewingUid));
+        if (snap.exists()) {
+          const d = snap.data();
+          setProfile({
+            displayName: d.displayName || "",
+            email: d.email || "",
+            photoURL: d.photoURL || "",
+          });
+        }
+        const list = await getUserPosts(viewingUid);
+        setPosts(list);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [viewingUid]);
+
+  if (!viewingUid) return <div className="p-6">Please sign in.</div>;
+
+  return (
+    <div className="min-h-[calc(100vh-80px)] bg-[#FFE7CC]">
+      {/* Cover */}
+      <div className="h-36 md:h-44 bg-[linear-gradient(135deg,#E2B887_0%,#B5EAD7_100%)]" />
+
+      {/* Card */}
+      <div className="-mt-12 md:-mt-16 mx-auto max-w-4xl px-4">
+        <div className="bg-white rounded-2xl shadow p-5 md:p-6">
+          <div className="flex items-center gap-4 md:gap-6">
+            <img
+              src={profile.photoURL || "https://i.pravatar.cc/120?img=8"}
+              alt={profile.displayName || profile.email}
+              className="w-20 h-20 md:w-24 md:h-24 rounded-full object-cover border-4 border-white shadow"
+            />
+
+            <div className="flex-1">
+              <h1 className="text-xl md:text-2xl font-bold text-[#8B6F47]">
+                {profile.displayName || "Unnamed"}
+              </h1>
+              <p className="text-gray-500 text-sm">{profile.email}</p>
+            </div>
+
+            <div className="flex gap-2">
+              {isMe ? (
+                <>
+                  <button
+                    onClick={() => navigate("/settings")}
+                    className="px-4 py-2 rounded-xl border border-[#E2B887]/60 text-[#8B6F47] hover:bg-[#FFF4E6]"
+                  >
+                    Edit Profile
+                  </button>
+                  <button
+                    onClick={() => navigate("/add")}
+                    className="px-4 py-2 rounded-xl bg-[#E2B887] text-white hover:brightness-95"
+                  >
+                    + New Post
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => navigate(`/chat`)}
+                  className="px-4 py-2 rounded-xl bg-[#E2B887] text-white hover:brightness-95"
+                >
+                  Message
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Posts grid */}
+      <div className="mx-auto max-w-4xl px-4 py-6">
+        <h2 className="text-lg font-semibold text-[#8B6F47] mb-3">Posts</h2>
+
+        {loading ? (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="aspect-square rounded-xl bg-black/5 animate-pulse" />
+            ))}
+          </div>
+        ) : posts.length === 0 ? (
+          <div className="bg-white rounded-2xl shadow p-8 text-center text-[#8B6F47]/70">
+            No posts yet.
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+            {posts.map((p) => (
+              <button
+                key={p.id}
+                className="aspect-square rounded-xl overflow-hidden bg-white shadow hover:shadow-md transition"
+                onClick={() => window.open(p.imageUrl || "#", "_blank")}
+              >
+                {p.imageUrl ? (
+                  <img
+                    src={p.imageUrl}
+                    alt={p.text || "post"}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center p-4">
+                    <p className="text-[#8B6F47] text-center">{p.text}</p>
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+
+
 // src/pages/AddPostPage.js
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
