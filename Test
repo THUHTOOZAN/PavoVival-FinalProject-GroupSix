@@ -2,44 +2,53 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{db}/documents {
 
-    // users (you already have these)
+    // --- USERS ---------------------------------------------------------
     match /users/{uid} {
-      allow read: if true;
+      allow read: if true; // anyone can read profiles
       allow create, update, delete: if request.auth != null && request.auth.uid == uid;
     }
 
-    // posts (keep yours)
+    // --- POSTS ---------------------------------------------------------
+    match /posts/{postId} {
+      allow read: if true; // public feed
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
 
-    // follows: users manage their own following & followers docs
+    // --- FOLLOWS -------------------------------------------------------
     match /follows/{uid} {
-      // I can read my follows; anyone can read counts by reading it (optional public read)
-      allow read: if true;
+      allow read: if true; // allow anyone to read counts (followers/following)
 
-      // I can write only inside my own follow subcollections
+      // Following subcollection (who I follow)
       match /following/{targetUid} {
         allow read: if true;
         allow write: if request.auth != null && request.auth.uid == uid;
       }
+
+      // Followers subcollection (who follows me)
       match /followers/{sourceUid} {
         allow read: if true;
-        // followers docs are written by the follower action (sourceUid writes into target's followers)
         allow write: if request.auth != null && request.auth.uid == sourceUid;
       }
     }
 
-    // notifications: each user controls their own box
+    // --- NOTIFICATIONS -------------------------------------------------
     match /notifications/{uid} {
-      allow read: if request.auth != null && request.auth.uid == uid; // private
-      match /items/{nid} {
+      // Only the owner can read their own notifications
+      allow read: if request.auth != null && request.auth.uid == uid;
+
+      match /items/{notifId} {
         allow read: if request.auth != null && request.auth.uid == uid;
-        // allow writes by the recipient (mark read) or by any signed-in user to add a notification to the recipient
+
+        // Any logged-in user can create a notification (like follow you)
         allow create: if request.auth != null;
+
+        // The recipient can update or delete (mark read, clear)
         allow update, delete: if request.auth != null && request.auth.uid == uid;
       }
     }
   }
 }
-
 
 ......
 
