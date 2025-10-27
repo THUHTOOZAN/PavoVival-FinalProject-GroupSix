@@ -1,60 +1,138 @@
-// src/components/PostCard.js
-import React from "react";
-import { Link } from "react-router-dom";
+// src/pages/HomePage.js
+import React, { useEffect, useMemo, useState } from "react";
+import { db } from "../firebase";
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  doc,
+  getDoc,
+} from "firebase/firestore";
+import PostCard from "../components/PostCard";
 
-// simple grid renderer; you can fancy this up later
-function ImagesGrid({ images = [] }) {
-  if (!images.length) return null;
-  if (images.length === 1) {
-    return (
-      <img
-        src={images[0].url}
-        alt="post"
-        className="w-full rounded-xl object-cover"
-      />
-    );
-  }
+export default function HomePage() {
+  const [posts, setPosts] = useState([]);
+  const [authors, setAuthors] = useState({}); // {uid: userDoc}
+
+  useEffect(() => {
+    const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, async (snap) => {
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setPosts(list);
+
+      // fetch missing authors (by uid)
+      const need = new Set(list.map((p) => p.uid).filter(Boolean));
+      const missing = [...need].filter((uid) => !authors[uid]);
+      if (missing.length) {
+        const pairs = await Promise.all(
+          missing.map(async (uid) => {
+            const s = await getDoc(doc(db, "users", uid));
+            return [uid, s.exists() ? s.data() : null];
+          })
+        );
+        setAuthors((prev) => {
+          const next = { ...prev };
+          for (const [uid, data] of pairs) next[uid] = data;
+          return next;
+        });
+      }
+    });
+    return unsub;
+  }, []); // load once
+
+  const feed = useMemo(
+    () => posts.map((p) => ({ post: p, author: authors[p.uid] })),
+    [posts, authors]
+  );
+
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {images.map((img, i) => (
-        <img
-          key={i}
-          src={img.url}
-          alt={`post-${i}`}
-          className="w-full h-48 object-cover rounded-xl"
-        />
+    <div className="space-y-4">
+      {feed.map(({ post, author }) => (
+        <PostCard key={post.id} post={post} author={author} />
       ))}
     </div>
   );
 }
 
-export default function PostCard({ post, author }) {
+
+........
+
+// src/pages/ProfilePage.js
+import React, { useEffect, useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import { db } from "../firebase";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+} from "firebase/firestore";
+import PostCard from "../components/PostCard";
+
+export default function ProfilePage() {
+  const { user } = useAuth();
+  const [me, setMe] = useState(null);
+  const [posts, setPosts] = useState([]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    (async () => {
+      // profile info
+      const s = await getDoc(doc(db, "users", user.uid));
+      setMe(s.exists() ? s.data() : { displayName: user.displayName, photoURL: user.photoURL, email: user.email });
+
+      // post index -> fetch each post
+      const q = query(
+        collection(db, "users", user.uid, "posts"),
+        orderBy("createdAt", "desc")
+      );
+      const indexSnap = await getDocs(q);
+      const ids = indexSnap.docs.map((d) => d.id);
+
+      const postDocs = await Promise.all(
+        ids.map((id) => getDoc(doc(db, "posts", id)))
+      );
+      const rows = postDocs
+        .filter((s) => s.exists())
+        .map((s) => ({ id: s.id, ...s.data() }));
+      setPosts(rows);
+    })();
+  }, [user]);
+
+  if (!user) return null;
+
   return (
-    <div className="bg-white/90 rounded-2xl shadow p-4 space-y-3">
-      {/* header */}
-      <div className="flex items-center gap-3">
+    <div className="space-y-6">
+      {/* Profile header */}
+      <div className="bg-white/90 rounded-2xl shadow p-6 flex items-center gap-4">
         <img
-          src={author?.photoURL || "https://i.pravatar.cc/48?img=5"}
-          alt={author?.displayName || "user"}
-          className="w-10 h-10 rounded-full object-cover"
+          src={me?.photoURL || "https://i.pravatar.cc/96?img=7"}
+          alt="me"
+          className="w-16 h-16 rounded-full object-cover"
         />
-        <div className="leading-tight">
-          <Link to="/profile" className="font-semibold text-[#8B6F47] hover:underline">
-            {author?.displayName || "Unknown"}
-          </Link>
-          <div className="text-xs text-[#8B6F47]/60">
-            {post?.createdAt?.toDate
-              ? post.createdAt.toDate().toLocaleString()
-              : ""}
+        <div>
+          <div className="text-xl font-semibold text-[#8B6F47]">
+            {me?.displayName || "Your profile"}
           </div>
+          <div className="text-sm text-[#8B6F47]/70">{me?.email}</div>
         </div>
       </div>
 
-      {/* caption */}
-      {post?.caption && <p className="text-[#634f2f]">{post.caption}</p>}
-
-      {/* images */}
-      <ImagesGrid images={post?.images || []} />
+      {/* My posts */}
+      <div className="space-y-4">
+        {posts.length === 0 ? (
+          <div className="text-center text-[#8B6F47]/60">
+            No posts yet. Use the + button to create one.
+          </div>
+        ) : (
+          posts.map((p) => <PostCard key={p.id} post={p} author={me} />)
+        )}
+      </div>
     </div>
   );
 }
+
