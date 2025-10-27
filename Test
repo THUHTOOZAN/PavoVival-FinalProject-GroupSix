@@ -1,148 +1,85 @@
-// src/pages/AddPostPage.js
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { db, storage } from "../firebase";
-import {
-  addDoc,
-  collection,
-  doc,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-} from "firebase/firestore";
-import { ref as sref, uploadBytes, getDownloadURL } from "firebase/storage";
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
 
-export default function AddPostPage() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
+    // --- USERS ---------------------------------------------------------
+    // Publicly readable profiles. Only the owner can write their own doc.
+    match /users/{uid} {
+      allow read: if true;
+      allow create, update, delete: if request.auth != null && request.auth.uid == uid;
 
-  const [caption, setCaption] = useState("");
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [error, setError] = useState("");
-
-  if (!user) {
-    return (
-      <div className="bg-white/90 rounded-2xl shadow-lg p-6 text-[#8B6F47]">
-        Please sign in to create a post.
-      </div>
-    );
-  }
-
-  function onPick(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setFile(f);
-    const url = URL.createObjectURL(f);
-    setPreview(url);
-  }
-
-  async function onPost(e) {
-    e?.preventDefault?.();
-    setError("");
-    if (!file && !caption.trim()) {
-      setError("Add a photo or say something about your pet.");
-      return;
-    }
-
-    try {
-      setPosting(true);
-
-      // 1) Upload image (if any)
-      let imageUrl = "";
-      if (file) {
-        const path = `posts/${user.uid}/${Date.now()}_${file.name}`;
-        const r = sref(storage, path);
-        await uploadBytes(r, file);
-        imageUrl = await getDownloadURL(r);
+      // Optional subcollection to index the owner's post IDs
+      match /posts/{postId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
       }
+    }
 
-      // 2) Create Firestore post
-      const postRef = await addDoc(collection(db, "posts"), {
-        uid: user.uid,
-        authorName: user.displayName || user.email || "Paw user",
-        authorPhoto: user.photoURL || "",
-        caption: caption.trim(),
-        imageUrl,
-        createdAt: serverTimestamp(),
-        likeCount: 0,
-        commentCount: 0,
-      });
+    // --- CHATS ---------------------------------------------------------
+    // Chat document must contain "members" = [uid1, uid2, ...]
+    match /chats/{chatId} {
+      allow read, write:
+        if request.auth != null &&
+           request.resource.data.members is list &&
+           request.auth.uid in request.resource.data.members;
 
-      // 3) (Optional) index under user for easy profile listing
-      await setDoc(doc(db, "users", user.uid, "posts", postRef.id), {
-        postId: postRef.id,
-        createdAt: serverTimestamp(),
-      });
+      // Messages subcollection inside a chat
+      match /messages/{msgId} {
+        allow read, write:
+          if request.auth != null &&
+             // Check membership against the parent chat doc
+             request.auth.uid in get(/databases/$(db)/documents/chats/$(chatId)).data.members;
+      }
+    }
 
-      // 4) Touch user doc with lastPostAt (optional)
-      await updateDoc(doc(db, "users", user.uid), {
-        lastPostAt: serverTimestamp(),
-      }).catch(() => {});
+    // --- POSTS ---------------------------------------------------------
+    // Global feed: anyone can read. Only the owner can create/update/delete.
+    match /posts/{postId} {
+      allow read: if true;
 
-      // 5) Done
-      navigate("/profile");
-    } catch (err) {
-      console.error(err);
-      setError(err.message || "Failed to post.");
-    } finally {
-      setPosting(false);
+      // Create: uid in payload must equal the caller's uid
+      allow create:
+        if request.auth != null &&
+           request.resource.data.uid == request.auth.uid;
+
+      // Update/Delete: only original author
+      allow update, delete:
+        if request.auth != null &&
+           resource.data.uid == request.auth.uid;
     }
   }
+}
 
-  return (
-    <div className="bg-white/90 rounded-2xl shadow-lg p-6">
-      <h2 className="text-2xl font-bold text-[#8B6F47] mb-4">Create Post</h2>
+......
 
-      <form onSubmit={onPost} className="space-y-4">
-        {/* Caption */}
-        <textarea
-          value={caption}
-          onChange={(e) => setCaption(e.target.value)}
-          placeholder="Say something about your pet…"
-          className="w-full min-h-[120px] p-3 border-2 border-[#E2B887]/30 rounded-2xl focus:border-[#E2B887] focus:outline-none bg-white/80"
-        />
 
-        {/* Image picker + preview */}
-        <div className="flex items-center gap-4">
-          <label
-            htmlFor="post-image"
-            className="px-4 py-2 rounded-xl border border-[#E2B887]/50 text-[#8B6F47] bg-[#FFF4E6] cursor-pointer hover:bg-[#FFE7CC]"
-          >
-            Add image
-          </label>
-          <input
-            id="post-image"
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={onPick}
-          />
-          {preview && (
-            <img
-              src={preview}
-              alt="preview"
-              className="w-20 h-20 rounded-xl object-cover border"
-            />
-          )}
-        </div>
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
 
-        {error && (
-          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-2xl px-4 py-2">
-            {error}
-          </div>
-        )}
+    // --- PROFILE AVATARS ----------------------------------------------
+    // Stored at: profile/{uid}/avatar.jpg
+    match /profile/{uid}/{fileName} {
+      allow read: if true; // avatars are public
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
 
-        <button
-          type="submit"
-          disabled={posting}
-          className="w-full bg-[#E2B887] text-white py-3 rounded-2xl font-semibold hover:brightness-95 transition disabled:opacity-50"
-        >
-          {posting ? "Posting…" : "Post"}
-        </button>
-      </form>
-    </div>
-  );
+    // --- CHAT IMAGES ---------------------------------------------------
+    // Stored at: chats/{chatId}/{uid}/{filename}
+    // Allow write only for signed-in users uploading to their own uid folder.
+    match /chats/{chatId}/{uid}/{fileName} {
+      allow read: if true;
+      allow write:
+        if request.auth != null && request.auth.uid == uid;
+      // (Optional) To also verify the user is a chat member, uncomment:
+      // && request.auth.uid in
+      //   get(/databases/(default)/documents/chats/$(chatId)).data.members;
+    }
+
+    // --- POST IMAGES ---------------------------------------------------
+    // Stored at: posts/{uid}/{filename}
+    match /posts/{uid}/{fileName} {
+      allow read: if true;  // public images
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
 }
