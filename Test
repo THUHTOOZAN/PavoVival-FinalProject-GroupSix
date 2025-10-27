@@ -1,66 +1,12 @@
-// src/pages/HomePage.js
-import React, { useEffect, useMemo, useState } from "react";
-import { db } from "../firebase";
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-  doc,
-  getDoc,
-} from "firebase/firestore";
-import PostCard from "../components/PostCard";
-
-export default function HomePage() {
-  const [posts, setPosts] = useState([]);
-  const [authors, setAuthors] = useState({}); // {uid: userDoc}
-
-  useEffect(() => {
-    const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
-    const unsub = onSnapshot(q, async (snap) => {
-      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setPosts(list);
-
-      // fetch missing authors (by uid)
-      const need = new Set(list.map((p) => p.uid).filter(Boolean));
-      const missing = [...need].filter((uid) => !authors[uid]);
-      if (missing.length) {
-        const pairs = await Promise.all(
-          missing.map(async (uid) => {
-            const s = await getDoc(doc(db, "users", uid));
-            return [uid, s.exists() ? s.data() : null];
-          })
-        );
-        setAuthors((prev) => {
-          const next = { ...prev };
-          for (const [uid, data] of pairs) next[uid] = data;
-          return next;
-        });
-      }
-    });
-    return unsub;
-  }, []); // load once
-
-  const feed = useMemo(
-    () => posts.map((p) => ({ post: p, author: authors[p.uid] })),
-    [posts, authors]
-  );
-
-  return (
-    <div className="space-y-4">
-      {feed.map(({ post, author }) => (
-        <PostCard key={post.id} post={post} author={author} />
-      ))}
-    </div>
-  );
-}
-
-
-........
-
 // src/pages/ProfilePage.js
-import React, { useEffect, useState } from "react";
+// Student-friendly, Instagram-style profile page.
+// - Shows avatar, display name, stats, and an Edit Profile button
+// - Hides email
+// - Renders a 3-column grid of your posts (first image as thumbnail)
+
+import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import {
   collection,
@@ -70,22 +16,35 @@ import {
   orderBy,
   query,
 } from "firebase/firestore";
-import PostCard from "../components/PostCard";
 
 export default function ProfilePage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+
+  // 🔹 profile info (from users/{uid})
   const [me, setMe] = useState(null);
+
+  // 🔹 my posts (full docs from posts/{postId})
   const [posts, setPosts] = useState([]);
 
+  // 1) Load profile + posts
   useEffect(() => {
     if (!user) return;
 
     (async () => {
-      // profile info
+      // profile
       const s = await getDoc(doc(db, "users", user.uid));
-      setMe(s.exists() ? s.data() : { displayName: user.displayName, photoURL: user.photoURL, email: user.email });
+      setMe(
+        s.exists()
+          ? s.data()
+          : {
+              displayName: user.displayName || "My profile",
+              photoURL: user.photoURL || "",
+              // email intentionally not shown in the UI
+            }
+      );
 
-      // post index -> fetch each post
+      // user post index -> fetch each post doc
       const q = query(
         collection(db, "users", user.uid, "posts"),
         orderBy("createdAt", "desc")
@@ -93,46 +52,134 @@ export default function ProfilePage() {
       const indexSnap = await getDocs(q);
       const ids = indexSnap.docs.map((d) => d.id);
 
-      const postDocs = await Promise.all(
-        ids.map((id) => getDoc(doc(db, "posts", id)))
-      );
-      const rows = postDocs
+      const docs = await Promise.all(ids.map((id) => getDoc(doc(db, "posts", id))));
+      const rows = docs
         .filter((s) => s.exists())
         .map((s) => ({ id: s.id, ...s.data() }));
       setPosts(rows);
     })();
   }, [user]);
 
+  // derived stats
+  const stats = useMemo(
+    () => ({
+      posts: posts.length,
+      followers: me?.followersCount ?? 0, // placeholder if you add later
+      following: me?.followingCount ?? 0, // placeholder if you add later
+    }),
+    [posts.length, me]
+  );
+
   if (!user) return null;
 
   return (
-    <div className="space-y-6">
-      {/* Profile header */}
-      <div className="bg-white/90 rounded-2xl shadow p-6 flex items-center gap-4">
-        <img
-          src={me?.photoURL || "https://i.pravatar.cc/96?img=7"}
-          alt="me"
-          className="w-16 h-16 rounded-full object-cover"
-        />
-        <div>
-          <div className="text-xl font-semibold text-[#8B6F47]">
-            {me?.displayName || "Your profile"}
+    <div className="max-w-4xl mx-auto">
+      {/* ===== Header ===== */}
+      <section className="bg-white/90 rounded-2xl shadow p-6 md:p-8 mb-6">
+        <div className="flex items-center gap-6 md:gap-10">
+          {/* avatar */}
+          <div className="shrink-0">
+            <img
+              src={me?.photoURL || "https://i.pravatar.cc/128?img=7"}
+              alt="avatar"
+              className="w-24 h-24 md:w-32 md:h-32 rounded-full object-cover ring-2 ring-[#E2B887]/50"
+            />
           </div>
-          <div className="text-sm text-[#8B6F47]/70">{me?.email}</div>
-        </div>
-      </div>
 
-      {/* My posts */}
-      <div className="space-y-4">
-        {posts.length === 0 ? (
-          <div className="text-center text-[#8B6F47]/60">
-            No posts yet. Use the + button to create one.
+          {/* name + actions */}
+          <div className="flex-1">
+            <div className="flex flex-col md:flex-row md:items-center md:gap-6">
+              <h1 className="text-2xl md:text-3xl font-bold text-[#8B6F47]">
+                {me?.displayName || "Your profile"}
+              </h1>
+
+              {/* actions */}
+              <div className="mt-3 md:mt-0 flex gap-3">
+                <button
+                  onClick={() => navigate("/settings")}
+                  className="px-4 py-2 rounded-xl bg-[#FFE7CC] text-[#8B6F47] border border-[#E2B887]/50 hover:bg-[#FFF2E1]"
+                >
+                  Edit Profile
+                </button>
+                <button
+                  onClick={() => navigate("/chat")}
+                  className="px-4 py-2 rounded-xl bg-white text-[#8B6F47] border border-[#E2B887]/50 hover:bg-[#FFF8EF]"
+                >
+                  Message
+                </button>
+              </div>
+            </div>
+
+            {/* stats */}
+            <ul className="mt-4 flex gap-8 text-[#8B6F47]">
+              <li>
+                <span className="font-semibold">{stats.posts}</span>{" "}
+                <span className="opacity-70">posts</span>
+              </li>
+              <li>
+                <span className="font-semibold">{stats.followers}</span>{" "}
+                <span className="opacity-70">followers</span>
+              </li>
+              <li>
+                <span className="font-semibold">{stats.following}</span>{" "}
+                <span className="opacity-70">following</span>
+              </li>
+            </ul>
+
+            {/* optional bio (add a "bio" field later if you want) */}
+            {me?.bio && (
+              <p className="mt-3 text-[#8B6F47]">{me.bio}</p>
+            )}
           </div>
-        ) : (
-          posts.map((p) => <PostCard key={p.id} post={p} author={me} />)
-        )}
-      </div>
+        </div>
+
+        {/* tabs (only visual for now) */}
+        <div className="mt-6 border-t border-[#E2B887]/30 pt-4">
+          <div className="flex gap-6 text-sm">
+            <span className="font-semibold text-[#8B6F47]">Posts</span>
+            <span className="text-[#8B6F47]/50 cursor-not-allowed">
+              Tagged (soon)
+            </span>
+          </div>
+        </div>
+      </section>
+
+      {/* ===== Grid ===== */}
+      {posts.length === 0 ? (
+        <div className="text-center text-[#8B6F47]/60">
+          No posts yet. Use the <b>+</b> button to create one.
+        </div>
+      ) : (
+        <section className="grid grid-cols-3 gap-2 md:gap-4">
+          {posts.map((p) => {
+            const thumb =
+              Array.isArray(p.images) && p.images.length > 0
+                ? p.images[0]
+                : null;
+
+            return (
+              <div
+                key={p.id}
+                className="relative aspect-square overflow-hidden rounded-lg bg-white/70 ring-1 ring-[#E2B887]/30"
+                title={p.text || "post"}
+              >
+                {thumb ? (
+                  <img
+                    src={thumb}
+                    alt="post"
+                    className="w-full h-full object-cover hover:scale-105 transition-transform"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-[#8B6F47]/60 p-3 text-center">
+                    {p.text?.slice(0, 40) || "Text post"}
+                  </div>
+                )}
+                {/* You can add click-to-open modal here later */}
+              </div>
+            );
+          })}
+        </section>
+      )}
     </div>
   );
 }
-
