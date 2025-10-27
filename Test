@@ -1,4 +1,5 @@
-import React from "react";
+// src/components/Layout.js
+import React, { useState, useRef } from "react";
 import {
   Camera,
   Search,
@@ -7,11 +8,12 @@ import {
   Plus,
   MessageCircle,
   Settings,
-  User
+  User,
+  Flag,
 } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 
-function NavButton({ icon: Icon, to, isCenter, end, label }) {
+function NavButton({ icon: Icon, to, label, end }) {
   return (
     <NavLink
       to={to}
@@ -19,12 +21,10 @@ function NavButton({ icon: Icon, to, isCenter, end, label }) {
       aria-label={label}
       className={({ isActive }) =>
         [
-          "relative p-3 rounded-full transition-all flex items-center justify-center",
-          isCenter
-            ? "bg-gradient-to-r from-[#E2B887] to-[#B5EAD7] text-white scale-110 shadow-lg"
-            : isActive
+          "p-3 rounded-full transition-all flex items-center justify-center",
+          isActive
             ? "bg-[#E2B887]/20 text-[#8B6F47]"
-            : "text-[#8B6F47]/60 hover:bg-[#E2B887]/10"
+            : "text-[#8B6F47]/60 hover:bg-[#E2B887]/10",
         ].join(" ")
       }
     >
@@ -34,6 +34,10 @@ function NavButton({ icon: Icon, to, isCenter, end, label }) {
 }
 
 export default function Layout({ children }) {
+  const [open, setOpen] = useState(false);
+  const filePicker = useRef(null);
+  const navigate = useNavigate();
+
   return (
     <div className="min-h-screen bg-[#FFE7CC] flex flex-col">
       {/* Header */}
@@ -63,666 +67,66 @@ export default function Layout({ children }) {
         <div className="max-w-4xl mx-auto p-6">{children}</div>
       </main>
 
-      {/* Bottom Nav */}
+      {/* Bottom Nav: 3 | + | 3 */}
       <nav className="bg-white border-t border-[#E2B887]/30 px-6 py-4">
-        <div className="max-w-7xl mx-auto grid grid-cols-5 md:grid-cols-6 gap-4 place-items-center">
+        <div className="max-w-7xl mx-auto grid grid-cols-7 gap-4 place-items-center">
+          {/* Left 3 */}
           <NavButton icon={Home} to="/" end label="Home" />
-          <NavButton icon={MapPin} to="/map" label="Map" />
-          <NavButton icon={Plus} to="/add" isCenter label="Add post" />
-          <NavButton icon={MessageCircle} to="/chat" label="Chat" />
           <NavButton icon={User} to="/profile" label="Profile" />
-          <div className="hidden md:block">
-            <NavButton icon={Settings} to="/settings" label="Settings" />
-          </div>
+          <NavButton icon={MessageCircle} to="/chat" label="Messages" />
+
+          {/* Center + */}
+          <button
+            aria-label="Create"
+            onClick={() => setOpen((v) => !v)}
+            className="p-3 rounded-full bg-gradient-to-r from-[#E2B887] to-[#B5EAD7] text-white shadow-lg scale-110"
+          >
+            <Plus className="w-6 h-6" />
+          </button>
+
+          {/* Right 3 */}
+          <NavButton icon={MapPin} to="/map" label="Map" />
+          <NavButton icon={Flag} to="/report" label="Report" />
+          <NavButton icon={Settings} to="/settings" label="Settings" />
         </div>
       </nav>
-    </div>
-  );
-}
 
-
-
-
-
-// src/pages/AddPostPage.js
-import React, { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { createPost } from "../services/postApi";
-
-const MAX_LEN = 280;
-
-export default function AddPostPage() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-
-  const [text, setText] = useState("");
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState("");
-  const [dragging, setDragging] = useState(false);
-
-  const taRef = useRef(null);
-
-  // Auto-expand textarea
-  useEffect(() => {
-    const el = taRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 280) + "px";
-  }, [text]);
-
-  if (!user) return <div className="p-6">Please sign in.</div>;
-
-  function handlePick(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
-  }
-
-  function clearImage() {
-    if (preview) URL.revokeObjectURL(preview);
-    setFile(null);
-    setPreview("");
-  }
-
-  // Drag & drop
-  function onDragOver(e) {
-    e.preventDefault();
-    setDragging(true);
-  }
-  function onDragLeave() {
-    setDragging(false);
-  }
-  function onDrop(e) {
-    e.preventDefault();
-    setDragging(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f) {
-      setFile(f);
-      setPreview(URL.createObjectURL(f));
-    }
-  }
-
-  async function submit(e) {
-    e?.preventDefault?.();
-    if (!text.trim() && !file) {
-      setErr("Write something or add an image.");
-      return;
-    }
-    if (text.length > MAX_LEN) {
-      setErr(`Keep it under ${MAX_LEN} characters.`);
-      return;
-    }
-
-    setErr("");
-    setSaving(true);
-    try {
-      await createPost({
-        uid: user.uid,
-        text: text.trim(),
-        file,
-        authorName: user.displayName || "",
-        authorPhoto: user.photoURL || "",
-      });
-      clearImage();
-      setText("");
-      navigate(`/profile/${user.uid}`);
-    } catch (e2) {
-      setErr(e2.message || "Failed to post.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function onKeyDown(e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      submit(e);
-    }
-  }
-
-  const remaining = Math.max(0, MAX_LEN - text.length);
-  const tooLong = text.length > MAX_LEN;
-
-  return (
-    <div className="min-h-[calc(100vh-80px)] bg-[#FFE7CC] flex justify-center p-6">
-      <div className="w-full max-w-2xl">
-        {/* Card */}
-        <div className="relative rounded-3xl shadow-xl overflow-hidden">
-          {/* soft gradient frame */}
-          <div className="absolute inset-0 bg-[linear-gradient(135deg,#E2B887_0%,#B5EAD7_100%)] opacity-30" />
-          <div className="relative bg-white/90 backdrop-blur p-5 md:p-6">
-            {/* Header: avatar + name */}
-            <div className="flex items-center gap-3 mb-4">
-              <img
-                src={user.photoURL || "https://i.pravatar.cc/64?img=5"}
-                alt={user.displayName || user.email}
-                className="w-12 h-12 rounded-full object-cover ring-2 ring-white shadow"
-              />
-              <div className="leading-tight">
-                <div className="font-semibold text-[#8B6F47]">
-                  {user.displayName || "You"}
-                </div>
-                <div className="text-xs text-[#8B6F47]/60">{user.email}</div>
-              </div>
-              <span className="ml-auto text-[11px] px-2 py-1 rounded-full bg-[#FFF4E6] border border-[#E2B887]/60 text-[#8B6F47]">
-                Public
-              </span>
-            </div>
-
-            {/* Composer */}
-            <form onSubmit={submit}>
-              <div
-                onDragOver={onDragOver}
-                onDragLeave={onDragLeave}
-                onDrop={onDrop}
-                className={`rounded-2xl border-2 ${
-                  dragging ? "border-dashed border-[#E2B887]" : "border-orange-200"
-                } bg-white/80 focus-within:border-orange-400 transition`}
-              >
-                <textarea
-                  ref={taRef}
-                  rows={4}
-                  placeholder="Share a moment with your pet…"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={onKeyDown}
-                  className="w-full resize-none p-4 rounded-2xl outline-none bg-transparent text-[#8B6F47] placeholder-[#8B6F47]/50"
-                />
-                {/* Image preview */}
-                {preview && (
-                  <div className="px-4 pb-4">
-                    <div className="relative">
-                      <img
-                        src={preview}
-                        alt="preview"
-                        className="w-full rounded-xl object-cover"
-                      />
-                      <button
-                        type="button"
-                        onClick={clearImage}
-                        className="absolute top-2 right-2 px-2 py-1 rounded-md bg-black/50 text-white text-xs"
-                        aria-label="Remove image"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Toolbar */}
-              <div className="mt-3 flex items-center gap-3">
-                <label
-                  htmlFor="post-file"
-                  className="cursor-pointer px-3 py-2 rounded-xl border border-[#E2B887]/60 text-[#8B6F47] hover:bg-[#FFF4E6] transition select-none"
-                  title="Add image"
-                >
-                  📷 Add image
-                </label>
-                <input
-                  id="post-file"
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handlePick}
-                />
-
-                <div className={`ml-auto text-sm ${tooLong ? "text-red-600" : "text-[#8B6F47]/60"}`}>
-                  {remaining} left
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={saving || (!text.trim() && !file) || tooLong}
-                  className="px-5 py-2 rounded-xl bg-[#E2B887] text-white font-semibold hover:brightness-95 disabled:opacity-50"
-                  title="Post (Ctrl/⌘ + Enter)"
-                >
-                  {saving ? "Posting…" : "Post"}
-                </button>
-              </div>
-
-              {err && (
-                <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
-                  {err}
-                </div>
-              )}
-            </form>
-          </div>
-        </div>
-
-        {/* Tips row */}
-        <div className="mt-3 text-xs text-[#8B6F47]/60 text-center">
-          Tip: You can drag a photo into the box, or press <kbd>Ctrl/⌘</kbd> + <kbd>Enter</kbd> to post.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-
-// src/components/PostCard.js
-import React from "react";
-import { useNavigate } from "react-router-dom";
-
-export default function PostCard({ post }) {
-  const navigate = useNavigate();
-  const goProfile = () => navigate(`/profile/${post.authorId}`);
-
-  return (
-    <div className="bg-white rounded-2xl shadow p-4 mb-4">
-      {/* header */}
-      <div className="flex items-center gap-3 mb-3">
-        <img
-          src={post.authorPhoto || "https://i.pravatar.cc/48?img=14"}
-          alt={post.authorName || "user"}
-          className="w-10 h-10 rounded-full object-cover cursor-pointer"
-          onClick={goProfile}
-        />
-        <div className="leading-tight">
-          <button
-            onClick={goProfile}
-            className="font-semibold text-[#8B6F47] hover:underline"
-          >
-            {post.authorName || "Unknown"}
-          </button>
-          <div className="text-xs text-[#8B6F47]/60">
-            {post.createdAt?.toDate
-              ? post.createdAt.toDate().toLocaleString()
-              : ""}
-          </div>
-        </div>
-      </div>
-
-      {/* body */}
-      {post.text && <p className="mb-3 text-[#8B6F47]">{post.text}</p>}
-      {post.imageUrl && (
-        <img
-          src={post.imageUrl}
-          alt="post"
-          className="w-full rounded-xl object-cover"
-        />
-      )}
-    </div>
-  );
-}
-
-
-.......
-
-
-
-
-// src/pages/HomePage.js
-import React, { useEffect, useState } from "react";
-import { getFeed } from "../services/postApi";
-import PostCard from "../components/PostCard";
-
-export default function HomePage() {
-  const [posts, setPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const list = await getFeed();
-        setPosts(list);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  return (
-    <div className="min-h-[calc(100vh-80px)] bg-[#FFE7CC] p-4">
-      <div className="max-w-2xl mx-auto">
-        {loading ? (
-          <div className="space-y-4">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-40 rounded-2xl bg-black/5 animate-pulse" />
-            ))}
-          </div>
-        ) : posts.length === 0 ? (
-          <div className="bg-white rounded-2xl shadow p-6 text-center text-[#8B6F47]/70">
-            No posts yet. Tap <span className="font-semibold">+ New Post</span> to share one!
-          </div>
-        ) : (
-          posts.map((p) => <PostCard key={p.id} post={p} />)
-        )}
-      </div>
-    </div>
-  );
-}
-
-.......
-
-
-
-
-// src/pages/ProfilePage.js
-import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { db } from "../firebase";
-import { doc, getDoc } from "firebase/firestore";
-import { getUserPosts } from "../services/postApi";
-
-export default function ProfilePage() {
-  const { user } = useAuth();
-  const { uid: routeUid } = useParams();
-  const navigate = useNavigate();
-
-  const viewingUid = routeUid || user?.uid;
-  const isMe = user && viewingUid === user.uid;
-
-  const [profile, setProfile] = useState({
-    displayName: "",
-    email: "",
-    photoURL: "",
-  });
-  const [posts, setPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!viewingUid) return;
-    (async () => {
-      try {
-        const snap = await getDoc(doc(db, "users", viewingUid));
-        if (snap.exists()) {
-          const d = snap.data();
-          setProfile({
-            displayName: d.displayName || "",
-            email: d.email || "",
-            photoURL: d.photoURL || "",
-          });
-        }
-        const list = await getUserPosts(viewingUid);
-        setPosts(list);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [viewingUid]);
-
-  if (!viewingUid) return <div className="p-6">Please sign in.</div>;
-
-  return (
-    <div className="min-h-[calc(100vh-80px)] bg-[#FFE7CC]">
-      {/* Cover */}
-      <div className="h-36 md:h-44 bg-[linear-gradient(135deg,#E2B887_0%,#B5EAD7_100%)]" />
-
-      {/* Card */}
-      <div className="-mt-12 md:-mt-16 mx-auto max-w-4xl px-4">
-        <div className="bg-white rounded-2xl shadow p-5 md:p-6">
-          <div className="flex items-center gap-4 md:gap-6">
-            <img
-              src={profile.photoURL || "https://i.pravatar.cc/120?img=8"}
-              alt={profile.displayName || profile.email}
-              className="w-20 h-20 md:w-24 md:h-24 rounded-full object-cover border-4 border-white shadow"
-            />
-
-            <div className="flex-1">
-              <h1 className="text-xl md:text-2xl font-bold text-[#8B6F47]">
-                {profile.displayName || "Unnamed"}
-              </h1>
-              <p className="text-gray-500 text-sm">{profile.email}</p>
-            </div>
-
-            <div className="flex gap-2">
-              {isMe ? (
-                <>
-                  <button
-                    onClick={() => navigate("/settings")}
-                    className="px-4 py-2 rounded-xl border border-[#E2B887]/60 text-[#8B6F47] hover:bg-[#FFF4E6]"
-                  >
-                    Edit Profile
-                  </button>
-                  <button
-                    onClick={() => navigate("/add")}
-                    className="px-4 py-2 rounded-xl bg-[#E2B887] text-white hover:brightness-95"
-                  >
-                    + New Post
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={() => navigate(`/chat`)}
-                  className="px-4 py-2 rounded-xl bg-[#E2B887] text-white hover:brightness-95"
-                >
-                  Message
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Posts grid */}
-      <div className="mx-auto max-w-4xl px-4 py-6">
-        <h2 className="text-lg font-semibold text-[#8B6F47] mb-3">Posts</h2>
-
-        {loading ? (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="aspect-square rounded-xl bg-black/5 animate-pulse" />
-            ))}
-          </div>
-        ) : posts.length === 0 ? (
-          <div className="bg-white rounded-2xl shadow p-8 text-center text-[#8B6F47]/70">
-            No posts yet.
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-            {posts.map((p) => (
-              <button
-                key={p.id}
-                className="aspect-square rounded-xl overflow-hidden bg-white shadow hover:shadow-md transition"
-                onClick={() => window.open(p.imageUrl || "#", "_blank")}
-              >
-                {p.imageUrl ? (
-                  <img
-                    src={p.imageUrl}
-                    alt={p.text || "post"}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center p-4">
-                    <p className="text-[#8B6F47] text-center">{p.text}</p>
-                  </div>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
-
-
-// src/pages/AddPostPage.js
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { createPost } from "../services/postApi";
-
-export default function AddPostPage() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-
-  const [text, setText] = useState("");
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState("");
-
-  if (!user) return <div className="p-6">Please sign in.</div>;
-
-  function pick(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
-  }
-
-  async function submit(e) {
-    e.preventDefault();
-    if (!text.trim() && !file) {
-      setErr("Write something or add an image.");
-      return;
-    }
-    setErr("");
-    setSaving(true);
-    try {
-      await createPost({
-        uid: user.uid,
-        text: text.trim(),
-        file,
-        authorName: user.displayName || "",
-        authorPhoto: user.photoURL || "",
-      });
-      navigate(`/profile/${user.uid}`); // go to your profile after posting
-    } catch (e2) {
-      setErr(e2.message || "Failed to post.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="min-h-[calc(100vh-80px)] bg-[#FFE7CC] flex justify-center p-6">
-      <form
-        onSubmit={submit}
-        className="w-full max-w-lg bg-white rounded-2xl shadow p-5"
-      >
-        <h2 className="text-xl font-bold text-[#8B6F47] mb-3">Create Post</h2>
-
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={4}
-          placeholder="Say something about your pet..."
-          className="w-full p-3 border rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-[#E2B887]"
-        />
-
-        {preview && (
-          <div className="mb-3">
-            <img
-              src={preview}
-              alt="preview"
-              className="w-full rounded-xl object-cover"
-            />
-          </div>
-        )}
-
-        <div className="flex items-center gap-3 mb-4">
-          <label
-            htmlFor="post-file"
-            className="cursor-pointer px-3 py-2 rounded-xl border border-[#E2B887]/60 text-[#8B6F47] hover:bg-[#FFF4E6]"
-          >
-            📷 Add image
-          </label>
-          <input
-            id="post-file"
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={pick}
-          />
-          {file && (
-            <button
-              type="button"
-              onClick={() => {
-                URL.revokeObjectURL(preview);
-                setFile(null);
-                setPreview("");
-              }}
-              className="text-sm text-red-600"
-            >
-              Remove
-            </button>
-          )}
-        </div>
-
-        {err && (
-          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2 mb-3">
-            {err}
-          </div>
-        )}
-
-        <button
-          type="submit"
-          disabled={saving}
-          className="w-full bg-[#E2B887] text-white py-3 rounded-xl font-semibold hover:brightness-95 disabled:opacity-50"
+      {/* Simple Action Sheet for the + button */}
+      {open && (
+        <div
+          className="fixed inset-0 bg-black/30 z-40"
+          onClick={() => setOpen(false)}
         >
-          {saving ? "Posting..." : "Post"}
-        </button>
-      </form>
+          <div
+            className="absolute bottom-20 left-1/2 -translate-x-1/2 w-[92%] max-w-sm bg-white rounded-2xl shadow-xl p-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                setOpen(false);
+                navigate("/add"); // go to composer
+              }}
+              className="w-full text-left px-4 py-3 rounded-xl hover:bg-[#FFF4E6] text-[#8B6F47] font-medium"
+            >
+              Create post
+            </button>
+
+            {/* Example future options:
+            <button className="w-full text-left px-4 py-3 rounded-xl hover:bg-[#FFF4E6] text-[#8B6F47]">Create story</button>
+            */}
+
+            <button
+              onClick={() => setOpen(false)}
+              className="w-full text-left px-4 py-3 rounded-xl text-[#8B6F47]/70"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden file input (keep for future “quick photo” flows) */}
+      <input ref={filePicker} type="file" className="hidden" />
     </div>
   );
-}
-
-
-
-
-
-// src/services/postApi.js
-import { db, storage } from "../firebase";
-import {
-  addDoc,
-  collection,
-  getDocs,
-  orderBy,
-  query,
-  serverTimestamp,
-  where,
-} from "firebase/firestore";
-import { getDownloadURL, ref as sref, uploadBytes } from "firebase/storage";
-
-// Create a post (text and/or image). Returns the new post id.
-export async function createPost({ uid, text, file, authorName, authorPhoto }) {
-  let imageUrl = "";
-
-  if (file) {
-    const path = `posts/${uid}/${Date.now()}_${file.name}`;
-    const r = sref(storage, path);
-    await uploadBytes(r, file);
-    imageUrl = await getDownloadURL(r);
-  }
-
-  const docRef = await addDoc(collection(db, "posts"), {
-    authorId: uid,
-    authorName: authorName || "",
-    authorPhoto: authorPhoto || "",
-    text: text || "",
-    imageUrl,
-    createdAt: serverTimestamp(),
-    likes: 0,
-    commentsCount: 0,
-  });
-
-  return docRef.id;
-}
-
-// Posts for a user (newest first)
-export async function getUserPosts(uid) {
-  const q = query(
-    collection(db, "posts"),
-    where("authorId", "==", uid),
-    orderBy("createdAt", "desc")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-}
-
-// Public feed (everyone; newest first)
-export async function getFeed(limitCount = 50) {
-  const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
