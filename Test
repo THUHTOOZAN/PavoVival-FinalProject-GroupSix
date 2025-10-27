@@ -1,3 +1,129 @@
+// src/pages/AddPostPage.js
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { createPost } from "../services/postApi";
+
+export default function AddPostPage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  const [text, setText] = useState("");
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  if (!user) return <div className="p-6">Please sign in.</div>;
+
+  function pick(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFile(f);
+    setPreview(URL.createObjectURL(f));
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!text.trim() && !file) {
+      setErr("Write something or add an image.");
+      return;
+    }
+    setErr("");
+    setSaving(true);
+    try {
+      await createPost({
+        uid: user.uid,
+        text: text.trim(),
+        file,
+        authorName: user.displayName || "",
+        authorPhoto: user.photoURL || "",
+      });
+      navigate(`/profile/${user.uid}`); // go to your profile after posting
+    } catch (e2) {
+      setErr(e2.message || "Failed to post.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="min-h-[calc(100vh-80px)] bg-[#FFE7CC] flex justify-center p-6">
+      <form
+        onSubmit={submit}
+        className="w-full max-w-lg bg-white rounded-2xl shadow p-5"
+      >
+        <h2 className="text-xl font-bold text-[#8B6F47] mb-3">Create Post</h2>
+
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={4}
+          placeholder="Say something about your pet..."
+          className="w-full p-3 border rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-[#E2B887]"
+        />
+
+        {preview && (
+          <div className="mb-3">
+            <img
+              src={preview}
+              alt="preview"
+              className="w-full rounded-xl object-cover"
+            />
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 mb-4">
+          <label
+            htmlFor="post-file"
+            className="cursor-pointer px-3 py-2 rounded-xl border border-[#E2B887]/60 text-[#8B6F47] hover:bg-[#FFF4E6]"
+          >
+            📷 Add image
+          </label>
+          <input
+            id="post-file"
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={pick}
+          />
+          {file && (
+            <button
+              type="button"
+              onClick={() => {
+                URL.revokeObjectURL(preview);
+                setFile(null);
+                setPreview("");
+              }}
+              className="text-sm text-red-600"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+
+        {err && (
+          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2 mb-3">
+            {err}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="w-full bg-[#E2B887] text-white py-3 rounded-xl font-semibold hover:brightness-95 disabled:opacity-50"
+        >
+          {saving ? "Posting..." : "Post"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+
+
+
+
 // src/services/postApi.js
 import { db, storage } from "../firebase";
 import {
