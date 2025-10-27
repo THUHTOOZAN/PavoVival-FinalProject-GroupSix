@@ -1,229 +1,408 @@
+// src/services/postApi.js
+import { db, storage } from "../firebase";
+import {
+  addDoc,
+  collection,
+  doc,
+  serverTimestamp,
+  setDoc,
+  getDoc,
+} from "firebase/firestore";
+import { getDownloadURL, ref as sref, uploadBytes } from "firebase/storage";
+
+/**
+ * Upload one image file to Storage and return its public URL
+ */
+async function uploadOneImage(file, uid, postId) {
+  const cleanName = file.name.replace(/\s+/g, "_");
+  const path = `posts/${postId}/${uid}_${Date.now()}_${cleanName}`;
+  const r = sref(storage, path);
+  await uploadBytes(r, file);
+  return await getDownloadURL(r);
+}
+
+/**
+ * Create a post with multiple images (up to 10)
+ * Returns the created postId
+ */
+export async function createPost({ user, text, files }) {
+  if (!user) throw new Error("Not signed in");
+  const uid = user.uid;
+
+  // 1) Create a placeholder post to get its id
+  const postsCol = collection(db, "posts");
+  const tmp = await addDoc(postsCol, {
+    uid,
+    text: text || "",
+    images: [],
+    createdAt: serverTimestamp(),
+    likeCount: 0,
+    commentCount: 0,
+  });
+  const postId = tmp.id;
+
+  // 2) Upload images (cap at 10)
+  const chosen = Array.from(files || []).slice(0, 10);
+  const urls = [];
+  for (const f of chosen) {
+    const url = await uploadOneImage(f, uid, postId);
+    urls.push(url);
+  }
+
+  // 3) Patch post with image URLs
+  await setDoc(
+    doc(db, "posts", postId),
+    {
+      images: urls,
+      // keep createdAt from server
+    },
+    { merge: true }
+  );
+
+  // 4) Index it under the author for fast profile loading
+  await setDoc(
+    doc(db, "users", uid, "posts", postId),
+    { createdAt: serverTimestamp() },
+    { merge: true }
+  );
+
+  return postId;
+}
+
+/**
+ * Convenience: read a post once by id
+ */
+export async function getPostOnce(postId) {
+  const snap = await getDoc(doc(db, "posts", postId));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+
+.......
+
+
+// src/pages/AddPostPage.js
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { createPost } from "../services/postApi";
+
+export default function AddPostPage() {
+  const { user } = useAuth();
+  const nav = useNavigate();
+
+  const [text, setText] = useState("");
+  const [files, setFiles] = useState([]);
+  const [previews, setPreviews] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  function onPick(e) {
+    const chosen = Array.from(e.target.files || []).slice(0, 10);
+    setFiles(chosen);
+    setPreviews(chosen.map((f) => URL.createObjectURL(f)));
+  }
+
+  async function onSubmit(e) {
+    e.preventDefault();
+    if (!user) return setErr("Please sign in.");
+    if (files.length === 0) return setErr("Pick at least one image.");
+
+    setErr("");
+    setBusy(true);
+    try {
+      await createPost({ user, text, files });
+      nav("/profile"); // jump to profile to see it in the grid
+    } catch (e2) {
+      console.error(e2);
+      setErr(e2.message || "Failed to post.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="min-h-[calc(100vh-80px)] flex justify-center p-6 bg-[#FFE7CC]">
+      <form
+        onSubmit={onSubmit}
+        className="w-full max-w-xl bg-white/90 rounded-2xl shadow-lg p-6"
+      >
+        <h2 className="text-xl font-bold text-[#8B6F47] mb-4">Create Post</h2>
+
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={3}
+          placeholder="Say something about your pet…"
+          className="w-full mb-3 px-4 py-3 border-2 border-[#E2B887]/40 rounded-2xl focus:outline-none focus:border-[#E2B887] bg-white/80"
+        />
+
+        {/* Picker */}
+        <label
+          htmlFor="post-files"
+          className="inline-block mb-3 px-3 py-2 rounded-full border border-[#E2B887]/60 bg-[#FFE7CC] text-[#8B6F47] cursor-pointer"
+        >
+          Add images (max 10)
+        </label>
+        <input
+          id="post-files"
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={onPick}
+        />
+
+        {/* Previews */}
+        {previews.length > 0 && (
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            {previews.map((src, i) => (
+              <div key={i} className="aspect-square overflow-hidden rounded-xl">
+                <img
+                  src={src}
+                  alt={`preview-${i}`}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {err && (
+          <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-2xl px-4 py-2">
+            {err}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={busy}
+          className="w-full bg-[#E2B887] text-white py-3 rounded-2xl font-semibold hover:brightness-95 transition disabled:opacity-50"
+        >
+          {busy ? "Posting…" : "Post"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+.........
+
+
 // src/pages/ProfilePage.js
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
   orderBy,
   query,
 } from "firebase/firestore";
 
-/* ---------- helpers: find an image URL in many possible shapes ---------- */
-const looksLikeImgUrl = (s) =>
-  typeof s === "string" &&
-  (s.startsWith("http") ||
-    s.startsWith("data:image") ||
-    s.startsWith("blob:")) &&
-  /\.(png|jpe?g|gif|webp|avif)(\?.*)?$/i.test(s);
+/**
+ * Simple modal for viewing a post like IG
+ */
+function PostModal({ post, onClose }) {
+  if (!post) return null;
+  return (
+    <div
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl p-4 w-[95vw] max-w-3xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex gap-4">
+          {/* Images carousel (very simple) */}
+          <div className="flex-1">
+            {post.images?.length ? (
+              <img
+                src={post.images[0]}
+                alt="post"
+                className="w-full max-h-[70vh] object-contain rounded-xl"
+              />
+            ) : (
+              <div className="w-full aspect-square bg-gray-100 rounded-xl" />
+            )}
+          </div>
+          {/* Caption */}
+          <div className="w-64">
+            <h3 className="font-semibold text-[#8B6F47] mb-2">Caption</h3>
+            <p className="text-sm text-[#8B6F47]/80 whitespace-pre-wrap">
+              {post.text || "—"}
+            </p>
+          </div>
+        </div>
 
-function firstUrlIn(val) {
-  if (!val) return null;
-  if (typeof val === "string" && looksLikeImgUrl(val)) return val;
-  if (Array.isArray(val)) {
-    for (const item of val) {
-      const u = firstUrlIn(item);
-      if (u) return u;
-    }
-  } else if (typeof val === "object") {
-    for (const v of Object.values(val)) {
-      const u = firstUrlIn(v);
-      if (u) return u;
-    }
-  }
-  return null;
-}
-
-function pickThumb(p) {
-  // common flat fields
-  for (const k of [
-    "imageUrl",
-    "imageURL",
-    "image",
-    "photo",
-    "thumbnail",
-    "url",
-    "src",
-  ]) {
-    if (p[k] && looksLikeImgUrl(p[k])) return p[k];
-  }
-  // common arrays/objects
-  if (Array.isArray(p.images) && p.images.length) {
-    const u = firstUrlIn(p.images[0]);
-    if (u) return u;
-  }
-  if (Array.isArray(p.media) && p.media.length) {
-    const u = firstUrlIn(p.media[0]);
-    if (u) return u;
-  }
-  // last resort: scan whole object
-  return firstUrlIn(p);
+        <button
+          className="mt-4 px-4 py-2 rounded-xl bg-[#E2B887] text-white"
+          onClick={onClose}
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function ProfilePage() {
   const { user } = useAuth();
-  const navigate = useNavigate();
+  const [profile, setProfile] = useState(null);
+  const [postIds, setPostIds] = useState([]);
+  const [posts, setPosts] = useState([]);
+  const [openPost, setOpenPost] = useState(null);
 
-  const [me, setMe] = useState(null);     // users/{uid}
-  const [posts, setPosts] = useState([]); // full posts
+  // derive display data
+  const displayName = useMemo(
+    () => profile?.displayName || user?.displayName || "Pet Lover",
+    [profile, user]
+  );
+  const photoURL = useMemo(
+    () => profile?.photoURL || user?.photoURL || "https://i.pravatar.cc/120?img=8",
+    [profile, user]
+  );
 
   useEffect(() => {
     if (!user) return;
 
+    // read Firestore user doc for name/photo
     (async () => {
-      // ---- Profile (from Firestore)
-      const uSnap = await getDoc(doc(db, "users", user.uid));
-      if (uSnap.exists()) {
-        setMe(uSnap.data());
-      } else {
-        setMe({
-          displayName: user.displayName || "My profile",
-          photoURL: user.photoURL || "",
-          bio: "",
-          followersCount: 0,
-          followingCount: 0,
-        });
-      }
+      const snap = await getDocs(
+        query(collection(db, "users"), orderBy("createdAt", "desc"))
+      ); // not strictly needed — just ensuring users exists
+    })().catch(() => {});
 
-      // ---- Post index -> fetch posts
-      const q = query(
+    // fetch my post index
+    (async () => {
+      const idxQ = query(
         collection(db, "users", user.uid, "posts"),
         orderBy("createdAt", "desc")
       );
-      const idx = await getDocs(q);
-      const ids = idx.docs.map((d) => d.id);
-      const full = await Promise.all(ids.map((id) => getDoc(doc(db, "posts", id))));
-      setPosts(full.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() })));
+      const idxSnap = await getDocs(idxQ);
+      setPostIds(idxSnap.docs.map((d) => d.id));
     })();
   }, [user]);
 
-  const stats = useMemo(
-    () => ({
-      posts: posts.length,
-      followers: me?.followersCount ?? 0,
-      following: me?.followingCount ?? 0,
-    }),
-    [posts.length, me]
-  );
+  // fetch full posts (shallow, once)
+  useEffect(() => {
+    if (!postIds.length) {
+      setPosts([]);
+      return;
+    }
+    (async () => {
+      // fetch in small batches to avoid limits
+      const out = [];
+      for (const id of postIds) {
+        const r = await fetch(`/posts/${id}.json`); // placeholder to keep busy spinner happy if you want
+        // ^ ignore; we will actually get posts via Firestore on-demand below:
+      }
+    })();
+  }, [postIds]);
 
-  if (!user) return null;
+  // Simplest: read each post individually (few posts = fine)
+  useEffect(() => {
+    (async () => {
+      const arr = [];
+      for (const id of postIds) {
+        const snap = await (await import("../services/postApi")).getPostOnce(id);
+        if (snap) arr.push(snap);
+      }
+      setPosts(arr);
+    })();
+  }, [postIds]);
+
+  if (!user) {
+    return (
+      <div className="min-h-[calc(100vh-80px)] flex items-center justify-center text-[#8B6F47]">
+        Sign in to see your profile.
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-5xl mx-auto">
-      {/* ===== Header card ===== */}
-      <section className="bg-white/90 rounded-2xl shadow p-6 md:p-8 mb-6">
-        <div className="flex gap-6 md:gap-8">
-          {/* avatar */}
+    <div className="min-h-[calc(100vh-80px)] bg-[#FFE7CC]">
+      {/* header card */}
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        <div className="bg-white/90 rounded-2xl shadow p-6 flex items-center gap-6">
           <img
-            src={me?.photoURL || "https://i.pravatar.cc/128?img=7"}
+            src={photoURL}
             alt="avatar"
-            className="w-24 h-24 md:w-28 md:h-28 rounded-full object-cover ring-2 ring-[#E2B887]/50"
+            className="w-24 h-24 rounded-full object-cover"
           />
-
-          {/* name + stats + bio */}
-          <div className="flex-1 min-w-0">
-            {/* name */}
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <h1 className="text-2xl md:text-3xl font-bold text-[#8B6F47] truncate">
-                  {me?.displayName || "Your profile"}
-                </h1>
-                {/* stats directly under the name */}
-                <ul className="mt-2 flex gap-6 text-[#8B6F47]">
-                  <li>
-                    <span className="font-semibold">{stats.posts}</span>{" "}
-                    <span className="opacity-70">posts</span>
-                  </li>
-                  <li>
-                    <span className="font-semibold">{stats.followers}</span>{" "}
-                    <span className="opacity-70">followers</span>
-                  </li>
-                  <li>
-                    <span className="font-semibold">{stats.following}</span>{" "}
-                    <span className="opacity-70">following</span>
-                  </li>
-                </ul>
-              </div>
-
-              {/* small buttons on the right */}
-              <div className="flex flex-col gap-2 items-stretch md:min-w-[160px] sm:flex-row sm:gap-2 md:flex-col">
-                <button
-                  onClick={() => navigate("/add")}
-                  className="px-3 py-1.5 rounded-lg bg-[#E2B887] text-white text-sm hover:brightness-95"
-                >
-                  Create post
-                </button>
-                <button
-                  onClick={() => navigate("/chat")}
-                  className="px-3 py-1.5 rounded-lg bg-white text-[#8B6F47] text-sm border border-[#E2B887]/50 hover:bg-[#FFF8EF]"
-                >
-                  Message
-                </button>
-                <button
-                  onClick={() => navigate("/settings")}
-                  className="px-3 py-1.5 rounded-lg bg-[#FFE7CC] text-[#8B6F47] text-sm border border-[#E2B887]/50 hover:bg-[#FFF2E1]"
-                >
-                  Edit profile
-                </button>
-              </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-4">
+              <h1 className="text-2xl font-bold text-[#8B6F47]">{displayName}</h1>
+              {/* small actions */}
+              <a
+                href="/add"
+                className="px-3 py-1 rounded-full text-sm bg-[#E2B887] text-white hover:brightness-95"
+              >
+                Create post
+              </a>
+              <a
+                href="/chat"
+                className="px-3 py-1 rounded-full text-sm border border-[#E2B887]/60 text-[#8B6F47] hover:bg-[#FFF1DF]"
+              >
+                Message
+              </a>
+              <a
+                href="/settings"
+                className="px-3 py-1 rounded-full text-sm border border-[#E2B887]/60 text-[#8B6F47] hover:bg-[#FFF1DF]"
+              >
+                Edit profile
+              </a>
             </div>
 
-            {/* bio (no email) */}
-            <div className="mt-3 text-[#6f5a36]">
-              {me?.bio ? (
-                <p className="whitespace-pre-line">{me.bio}</p>
-              ) : (
-                <button
-                  onClick={() => navigate("/settings")}
-                  className="text-[#8B6F47] underline underline-offset-2"
-                  title="Add a short bio in Settings"
-                >
-                  Add short bio
-                </button>
-              )}
+            {/* stats row right under name */}
+            <div className="mt-2 flex gap-6 text-[#8B6F47]">
+              <span>{posts.length} posts</span>
+              <span>0 followers</span>
+              <span>0 following</span>
+            </div>
+
+            {/* bio */}
+            <div className="mt-2 text-[#8B6F47]/80">
+              {/* You can store bio in users/{uid}.bio later */}
+              <a href="/settings" className="underline">Add bio</a>
             </div>
           </div>
         </div>
-      </section>
+      </div>
 
-      {/* ===== Posts grid ===== */}
-      {posts.length === 0 ? (
-        <div className="text-center text-[#8B6F47]/60">
-          No posts yet. Tap <b>+</b> to create one.
-        </div>
-      ) : (
-        <section className="grid grid-cols-3 gap-2 md:gap-4">
-          {posts.map((p) => {
-            const src = pickThumb(p);
-            return (
-              <div
+      {/* grid */}
+      <div className="max-w-5xl mx-auto px-4 pb-12">
+        {posts.length === 0 ? (
+          <div className="text-center text-[#8B6F47]/70">No posts yet.</div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {posts.map((p) => (
+              <button
                 key={p.id}
-                className="relative aspect-square overflow-hidden rounded-lg bg-white/70 ring-1 ring-[#E2B887]/30"
-                title={p.text || "post"}
+                onClick={() => setOpenPost(p)}
+                className="aspect-square bg-white/70 rounded-2xl overflow-hidden hover:opacity-90"
+                title="Open"
               >
-                {src ? (
+                {p.images?.[0] ? (
                   <img
-                    src={src}
+                    src={p.images[0]}
                     alt="post"
-                    loading="lazy"
-                    className="w-full h-full object-cover hover:scale-105 transition-transform"
-                    onError={(e) => {
-                      e.currentTarget.style.opacity = 0.2;
-                    }}
+                    className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-[#8B6F47]/60 p-3 text-center">
-                    {p.text?.slice(0, 40) || "Text post"}
-                  </div>
+                  <div className="w-full h-full flex items-center justify-center text-[#8B6F47]/50">post</div>
                 )}
-              </div>
-            );
-          })}
-        </section>
-      )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <PostModal post={openPost} onClose={() => setOpenPost(null)} />
     </div>
   );
 }
+
+.........
+
