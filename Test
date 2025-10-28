@@ -1,3 +1,38 @@
+const [isFollowing, setIsFollowing] = useState(false);
+
+useEffect(() => {
+  if (!user || !profile?.uid) return;
+  // live follow status
+  const unsub = onIsFollowing({ meUid: user.uid, targetUid: profile.uid }, setIsFollowing);
+  return unsub;
+}, [user, profile?.uid]);
+
+const handleFollow = async () => {
+  try {
+    await followUser({
+      meUid: user.uid,
+      meProfile: { displayName: user.displayName, photoURL: user.photoURL },
+      targetUid: profile.uid,
+      targetProfile: { displayName: profile.displayName, photoURL: profile.photoURL },
+    });
+  } catch (e) {
+    console.error(e);
+    alert(e.message);
+  }
+};
+
+const handleUnfollow = async () => {
+  try {
+    await unfollowUser({ meUid: user.uid, targetUid: profile.uid });
+  } catch (e) {
+    console.error(e);
+    alert(e.message);
+  }
+};
+
+
+
+
 import { db } from "../firebase";
 import {
   doc,
