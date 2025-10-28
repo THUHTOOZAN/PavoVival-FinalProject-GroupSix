@@ -1,3 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- USERS ---------------------------------------------------------
+    match /users/{uid} {
+      allow read: if true;
+      allow create, update, delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // --- POSTS ---------------------------------------------------------
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow delete, update: if request.auth != null && request.auth.uid == resource.data.uid;
+
+      // LIKES
+      match /likes/{actorId} {
+        allow read: if true;
+        allow write: if request.auth != null && request.auth.uid == actorId;
+      }
+
+      // COMMENTS
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if request.auth != null;
+        allow update, delete: if request.auth != null && request.auth.uid == resource.data.author.uid;
+      }
+    }
+
+    // --- FOLLOWS -------------------------------------------------------
+    // follows/{uid}/followers/{sourceUid}  &  follows/{uid}/following/{targetUid}
+    match /follows/{uid} {
+      allow read: if true;
+
+      match /followers/{sourceUid} {
+        allow read: if true;
+        // the follower writes under their own UID
+        allow write: if request.auth != null && request.auth.uid == sourceUid;
+      }
+
+      match /following/{targetUid} {
+        allow read: if true;
+        // the current user writes to their own "following"
+        allow write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+
+    // --- NOTIFICATIONS -------------------------------------------------
+    // notifications/{uid}/items/{notifId}
+    match /notifications/{uid} {
+      // owner can get/list the container
+      allow get, list: if request.auth != null && request.auth.uid == uid;
+
+      match /items/{notifId} {
+        // owner can read their items
+        allow get, list: if request.auth != null && request.auth.uid == uid;
+
+        // owner can only toggle 'isRead' from the client
+        allow update: if request.auth != null
+                      && request.auth.uid == uid
+                      && request.resource.data.diff(resource.data).changedKeys().hasOnly(['isRead']);
+
+        // creation/deletion comes from Cloud Functions (Admin SDK bypasses rules)
+        allow create, delete: if false;
+      }
+    }
+
+    // (your other collections … chats/messages/reports … if you have them)
+  }
+}
+
+
+
 PROJECT_ID=petsnaps-882dd
 PROJECT_NUMBER=57585989255
 
