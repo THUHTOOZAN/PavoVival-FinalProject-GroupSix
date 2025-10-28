@@ -1,3 +1,149 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    /* ---------- helpers ---------- */
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isUser(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+    function inArray(arr, v) {
+      return arr != null && (v in arr);
+    }
+
+    /* ---------- USERS (public read; owner write) ---------- */
+    match /users/{uid} {
+      allow read: if true;
+      allow create, update, delete: if isUser(uid);
+    }
+
+    /* ---------- POSTS (public feed) ---------- */
+    match /posts/{postId} {
+      allow read: if true;
+
+      // author uid must match the authenticated user
+      allow create: if signedIn() &&
+        request.resource.data.uid == request.auth.uid;
+
+      allow update, delete: if signedIn() &&
+        resource.data.uid == request.auth.uid;
+
+      // COMMENTS: anyone signed-in may add; only author can delete
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if signedIn();  // author stored in doc
+        allow update, delete: if signedIn() &&
+          resource.data.author.uid == request.auth.uid;
+      }
+
+      // LIKES: document id (or field) should be liker uid
+      // allows toggle like/unlike by the same user only
+      match /likes/{likeUid} {
+        allow read: if true;
+        allow create, update, delete: if isUser(likeUid);
+      }
+    }
+
+    /* ---------- FOLLOWS (fan-out: following & followers) ---------- */
+    match /follows/{uid} {
+
+      allow read: if true;
+
+      // I can edit my "following" subcollection
+      match /following/{targetUid} {
+        allow read: if true;
+        allow write: if isUser(uid);
+      }
+
+      // Anyone can write a doc under *their own* uid in someone else’s "followers"
+      // (this is what your follow/unfollow code does)
+      match /followers/{sourceUid} {
+        allow read: if true;
+        allow write: if isUser(sourceUid);
+      }
+    }
+
+    /* ---------- NOTIFICATIONS (private per user) ---------- */
+    // Structure: notifications/{uid}/items/{notifId}
+    // Client creates when performing an action (follow/like/comment).
+    match /notifications/{uid} {
+      // Only the owner can read their notifications list
+      allow read: if isUser(uid);
+
+      match /items/{notifId} {
+        // Owner can read & mark read/delete
+        allow read, update, delete: if isUser(uid);
+
+        // Anyone signed-in can create a notification addressed to {uid},
+        // but the 'fromUid' must be the caller.
+        allow create: if signedIn() &&
+          request.resource.data.fromUid == request.auth.uid &&
+          request.resource.data.type in ['follow','like','comment'] &&
+          // basic shape hardening
+          request.resource.data.createdAt is timestamp &&
+          request.resource.data.read is bool;
+      }
+    }
+
+    /* ---------- CHATS (1:1) ---------- */
+    // chats/{chatId} has: members: [uidA, uidB], typing: {uid: bool}, lastMessage, lastMessageAt
+    match /chats/{chatId} {
+      // Only members can read the chat document
+      allow read: if signedIn() && inArray(resource.data.members, request.auth.uid);
+
+      // Create a chat if the caller is one of the members they are writing
+      allow create: if signedIn() &&
+        inArray(request.resource.data.members, request.auth.uid);
+
+      // Members can update limited fields of the chat doc
+      allow update: if signedIn() &&
+        inArray(resource.data.members, request.auth.uid) &&
+        // Only allow these fields to change:
+        request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(['lastMessage', 'lastMessageAt', 'typing', 'members']);
+
+      // Delete forbidden from clients
+      allow delete: if false;
+
+      // Subcollection: messages
+      match /messages/{messageId} {
+        // Only chat members can read
+        allow read: if signedIn() &&
+          inArray(get(/databases/$(db)/documents/chats/$(chatId)).data.members, request.auth.uid);
+
+        // Create: sender must be the caller and a member of the chat
+        allow create: if signedIn() &&
+          request.resource.data.senderId == request.auth.uid &&
+          inArray(get(/databases/$(db)/documents/chats/$(chatId)).data.members, request.auth.uid);
+
+        // Update (e.g., append to seenBy): only members
+        allow update: if signedIn() &&
+          inArray(get(/databases/$(db)/documents/chats/$(chatId)).data.members, request.auth.uid);
+
+        // No deletes from clients
+        allow delete: if false;
+      }
+    }
+
+    /* ---------- OPTIONAL: REPORTS (if you use them) ---------- */
+    match /reports/{reportId} {
+      allow read: if signedIn();
+      allow create: if signedIn() &&
+        request.resource.data.reporterId == request.auth.uid;
+      allow update, delete: if isUser(resource.data.reporterId);
+    }
+  }
+}
+
+
+
+
+
+
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { db, storage } from "../firebase";
