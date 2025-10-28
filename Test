@@ -6,6 +6,157 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+    function hasMembersField(m) {
+      return m is list && m.size() >= 1 && m.size() <= 10;
+    }
+    function isStringListMax10(arr) {
+      // Firestore rules can't iterate lists; keep it simple & valid
+      return arr is list && arr.size() <= 10;
+    }
+
+    // ---------- USERS ----------
+    match /users/{uid} {
+      allow read: if true;
+      allow create, update, delete: if isOwner(uid);
+    }
+
+    // ---------- POSTS ----------
+    match /posts/{postId} {
+      allow read: if true;
+
+      // author creates their post; images optional but must be list<=10
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && (!('images' in request.resource.data) || isStringListMax10(request.resource.data.images));
+
+      // only the author may update/delete; uid cannot change
+      allow update, delete: if isSignedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && (!('images' in request.resource.data) || isStringListMax10(request.resource.data.images));
+
+      // comments subcollection
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isSignedIn(); // allow, app enforces content length
+        allow update, delete: if isSignedIn()
+          && resource.data.author.uid == request.auth.uid;
+      }
+
+      // likes subcollection (doc id = liker uid)
+      match /likes/{likeUid} {
+        allow read: if true;
+        allow create, update, delete: if isOwner(likeUid);
+      }
+    }
+
+    // ---------- FOLLOWS ----------
+    // /follows/{uid}/following/{targetUid} and /follows/{uid}/followers/{sourceUid}
+    match /follows/{uid} {
+      allow read: if true;
+
+      match /following/{targetUid} {
+        allow read: if true;
+        allow write: if isOwner(uid);           // I control who I follow
+      }
+      match /followers/{sourceUid} {
+        allow read: if true;
+        allow write: if isOwner(sourceUid);     // I appear in others' followers when I act
+      }
+    }
+
+    // ---------- NOTIFICATIONS ----------
+    // /notifications/{uid}/items/{notifId}
+    match /notifications/{uid} {
+      allow read: if isOwner(uid);
+      match /items/{notifId} {
+        allow read: if isOwner(uid);
+        allow create: if isSignedIn();          // client or Cloud Functions may add
+        allow update, delete: if isOwner(uid);
+      }
+    }
+
+    // ---------- CHATS (DMs / small groups) ----------
+    // chat doc must include: { members: [uidA, uidB, ...] }
+    match /chats/{chatId} {
+      allow read: if isSignedIn()
+        && hasMembersField(resource.data.members)
+        && request.auth.uid in resource.data.members;
+
+      allow create: if isSignedIn()
+        && hasMembersField(request.resource.data.members)
+        && request.auth.uid in request.resource.data.members;
+
+      allow update, delete: if isSignedIn()
+        && hasMembersField(resource.data.members)
+        && request.auth.uid in resource.data.members;
+
+      match /messages/{messageId} {
+        // Only participants can read
+        allow read: if isSignedIn()
+          && request.auth.uid in get(/databases/$(db)/documents/chats/$(chatId)).data.members;
+
+        // Sender must be me and a participant
+        allow create: if isSignedIn()
+          && request.resource.data.senderId == request.auth.uid
+          && request.auth.uid in get(/databases/$(db)/documents/chats/$(chatId)).data.members;
+
+        // Only original sender can edit/delete their message
+        allow update, delete: if isSignedIn()
+          && resource.data.senderId == request.auth.uid;
+      }
+    }
+  }
+}
+
+
+
+
+
+
+
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Post images (store under posts/{uid}/...)
+    match /posts/{uid}/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Chat images (store under chats/{chatId}/...)
+    match /chats/{chatId}/{allPaths=**} {
+      allow read, write: if request.auth != null &&
+        firestore.get(/databases/$(database)/documents/chats/$(chatId))
+                 .data.members.hasAny([request.auth.uid]);
+    }
+
+    // Optional: avatars at users/{uid}/...
+    match /users/{uid}/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}
+
+
+
+
+
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    // ---------- helpers ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
 
     function isOwner(uid) {
       return isSignedIn() && request.auth.uid == uid;
