@@ -1,3 +1,113 @@
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+admin.initializeApp();
+const db = admin.firestore();
+const ts = admin.firestore.FieldValue.serverTimestamp;
+
+// helper to safely read user profile (name + avatar)
+async function getActor(actorId) {
+  try {
+    const snap = await db.doc(`users/${actorId}`).get();
+    return {
+      name: snap.get("displayName") || "Someone",
+      avatar: snap.get("photoURL") || null,
+    };
+  } catch {
+    return { name: "Someone", avatar: null };
+  }
+}
+
+// ========== FOLLOW ==========
+exports.onFollowCreate = functions.firestore
+  .document("follows/{targetId}/followers/{actorId}")
+  .onCreate(async (snap, ctx) => {
+    const { targetId, actorId } = ctx.params;
+    if (targetId === actorId) return;
+
+    const actor = await getActor(actorId);
+    const notifId = `follow:${actorId}`; // one per follower
+
+    await db.collection("notifications").doc(targetId)
+      .collection("items").doc(notifId)
+      .set({
+        userId: targetId,
+        actor: { id: actorId, name: actor.name, avatar: actor.avatar },
+        type: "follow",
+        entity: { type: "user", id: actorId },
+        message: `${actor.name} started following you`,
+        url: `/user/${actorId}`,
+        isRead: false,
+        createdAt: ts(),
+      }, { merge: true });
+  });
+
+// ========== LIKE ==========
+exports.onLikeCreate = functions.firestore
+  .document("posts/{postId}/likes/{actorId}")
+  .onCreate(async (snap, ctx) => {
+    const { postId, actorId } = ctx.params;
+
+    const postSnap = await db.doc(`posts/${postId}`).get();
+    if (!postSnap.exists) return;
+
+    const ownerId = postSnap.get("author.uid") || postSnap.get("uid");
+    if (!ownerId || ownerId === actorId) return;
+
+    const actor = await getActor(actorId);
+    const notifId = `like:${postId}:${actorId}`;
+
+    await db.collection("notifications").doc(ownerId)
+      .collection("items").doc(notifId)
+      .set({
+        userId: ownerId,
+        actor: { id: actorId, name: actor.name, avatar: actor.avatar },
+        type: "like",
+        entity: { type: "post", id: postId },
+        message: `${actor.name} liked your post`,
+        url: `/post/${postId}`,
+        isRead: false,
+        createdAt: ts(),
+      }, { merge: true });
+  });
+
+// ========== COMMENT ==========
+exports.onCommentCreate = functions.firestore
+  .document("posts/{postId}/comments/{commentId}")
+  .onCreate(async (snap, ctx) => {
+    const { postId, commentId } = ctx.params;
+    const c = snap.data() || {};
+    const actorId = c.actorId || c.userId || c.author?.uid;
+    if (!actorId) return;
+
+    const postSnap = await db.doc(`posts/${postId}`).get();
+    if (!postSnap.exists) return;
+
+    const ownerId = postSnap.get("author.uid") || postSnap.get("uid");
+    if (!ownerId || ownerId === actorId) return;
+
+    const actor = await getActor(actorId);
+    const notifId = `comment:${postId}:${commentId}`;
+
+    await db.collection("notifications").doc(ownerId)
+      .collection("items").doc(notifId)
+      .set({
+        userId: ownerId,
+        actor: { id: actorId, name: actor.name, avatar: actor.avatar },
+        type: "comment",
+        entity: { type: "post", id: postId },
+        message: `${actor.name} commented on your post`,
+        url: `/post/${postId}#comment-${commentId}`,
+        isRead: false,
+        createdAt: ts(),
+      }, { merge: true });
+  });
+
+
+
+
+
+
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{db}/documents {
