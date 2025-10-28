@@ -4,7 +4,7 @@ service cloud.firestore {
 
     // --- USERS ---------------------------------------------------------
     match /users/{uid} {
-      allow read: if true; // anyone can read profiles
+      allow read: if true; // anyone can view profiles
       allow create, update, delete: if request.auth != null && request.auth.uid == uid;
     }
 
@@ -13,29 +13,36 @@ service cloud.firestore {
       allow read: if true; // public feed
       allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
       allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
-      allow update: if request.auth != null;
-    }
-    
-    // --- COMMENTS ------------------------------------------------------
-    match /posts/{postId}/comments/{commentId} {
-      allow read: if true;
-      allow create: if request.auth != null;
-      allow delete: if request.auth.uid == resource.data.author.uid;
-    }
+      allow update: if request.auth != null && request.auth.uid == resource.data.uid;
+      
+      // --- COMMENTS (subcollection) -----------------------------------
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if request.auth != null;
+        allow delete: if request.auth != null && request.auth.uid == resource.data.author.uid;
+        allow update: if request.auth != null && request.auth.uid == resource.data.author.uid;
+      }
 
+      // --- LIKES (subcollection) --------------------------------------
+      match /likes/{actorId} {
+        allow read: if true;
+        allow write: if request.auth != null && request.auth.uid == actorId;
+      }
+    }
 
     // --- CHATS --------------------------------------------------------- 
     match /chats/{chatId} {
       allow read, write: if request.auth != null;
-      
+
       match /messages/{messageId} {
         allow read, write: if request.auth != null;
       }
     }
 
     // --- FOLLOWS -------------------------------------------------------
+    // Structure: follows/{uid}/followers/{sourceUid}  &  follows/{uid}/following/{targetUid}
     match /follows/{uid} {
-      allow read: if true;
+      allow read: if true;  // anyone can view followers/following lists
 
       match /following/{targetUid} {
         allow read: if true;
@@ -49,13 +56,26 @@ service cloud.firestore {
     }
 
     // --- NOTIFICATIONS -------------------------------------------------
+    // Structure: notifications/{uid}/items/{notifId}
     match /notifications/{uid} {
-      allow read: if request.auth != null && request.auth.uid == uid;
+
+      // user can list their own notification container doc
+      allow get, list: if request.auth != null && request.auth.uid == uid;
 
       match /items/{notifId} {
-        allow read: if request.auth != null && request.auth.uid == uid;
-        allow create: if request.auth != null;
-        allow update, delete: if request.auth != null && request.auth.uid == uid;
+        // owner can read their notifications
+        allow get, list: if request.auth != null && request.auth.uid == uid;
+
+        // owner can mark them read (only change 'isRead')
+        allow update: if request.auth != null
+                      && request.auth.uid == uid
+                      && request.resource.data.diff(resource.data)
+                          .changedKeys()
+                          .hasOnly(['isRead']);
+
+        // notifications should be created by Cloud Functions (admin SDK bypasses rules)
+        // block normal users from manually creating or deleting notifications
+        allow create, delete: if false;
       }
     }
 
@@ -63,7 +83,7 @@ service cloud.firestore {
     match /messages/{messageId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && 
+      allow update, delete: if request.auth != null &&
         request.auth.uid == resource.data.senderId;
     }
 
@@ -71,11 +91,12 @@ service cloud.firestore {
     match /reports/{reportId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && 
+      allow update, delete: if request.auth != null &&
         request.auth.uid == resource.data.reporterId;
     }
-  }
-}
+
+  } // end documents
+} // end service
 
 
 
