@@ -1,3 +1,60 @@
+PS C:\Users\thuht\Petsnaps\functions> firebase deploy --only functions
+
+=== Deploying to 'petsnaps-882dd'...
+
+i  deploying functions
+i  functions: preparing codebase default for deployment
+i  functions: ensuring required API cloudfunctions.googleapis.com is enabled...
+i  functions: ensuring required API cloudbuild.googleapis.com is enabled...
+i  artifactregistry: ensuring required API artifactregistry.googleapis.com is enabled...
+!  functions: package.json indicates an outdated version of firebase-functions. Please upgrade using npm install --save firebase-functions@latest in your functions directory.
+!  functions: Please note that there will be breaking changes when you upgrade.
+i  functions: Loading and analyzing source code for codebase default to determine what to deploy
+Serving at port 8914
+
+i  extensions: ensuring required API firebaseextensions.googleapis.com is enabled...
+!  extensions: missing required API firebaseextensions.googleapis.com. Enabling now...
+i  functions: preparing functions directory for uploading...
+i  functions: packaged C:\Users\thuht\Petsnaps\functions (77.91 KB) for uploading
+i  functions: ensuring required API run.googleapis.com is enabled...
+i  functions: ensuring required API eventarc.googleapis.com is enabled...
+i  functions: ensuring required API pubsub.googleapis.com is enabled...
+i  functions: ensuring required API storage.googleapis.com is enabled...
+!  functions: missing required API run.googleapis.com. Enabling now...
+!  functions: missing required API eventarc.googleapis.com. Enabling now...
++  functions: required API pubsub.googleapis.com is enabled
++  functions: required API storage.googleapis.com is enabled
+i  functions: generating the service identity for pubsub.googleapis.com...
+i  functions: generating the service identity for eventarc.googleapis.com...
++  functions: functions source uploaded successfully
+i  functions: creating Node.js 20 (2nd Gen) function onFollowCreate(us-central1)...
+i  functions: creating Node.js 20 (2nd Gen) function onLikeCreate(us-central1)...
+i  functions: creating Node.js 20 (2nd Gen) function onCommentCreate(us-central1)...
+!  functions: Request to https://cloudfunctions.googleapis.com/v2/projects/petsnaps-882dd/locations/us-central1/functions?functionId=onFollowCreate had HTTP Error: 400, Validation failed for trigger projects/petsnaps-882dd/locations/nam5/triggers/onfollowcreate-334365: Invalid resource state for "": Permission denied while using the Eventarc Service Agent. If you recently started to use Eventarc, it may take a few minutes before all necessary permissions are propagated to the Service Agent. Otherwise, verify that it has Eventarc Service Agent role.
+!  functions: Since this is your first time using 2nd gen functions, we need a little bit longer to finish setting everything up. Retry the deployment in a few minutes.
+!  functions:  failed to create function projects/petsnaps-882dd/locations/us-central1/functions/onFollowCreate
+Failed to create function projects/petsnaps-882dd/locations/us-central1/functions/onFollowCreate
+!  functions: Request to https://cloudfunctions.googleapis.com/v2/projects/petsnaps-882dd/locations/us-central1/functions?functionId=onLikeCreate had HTTP Error: 400, Validation failed for trigger projects/petsnaps-882dd/locations/nam5/triggers/onlikecreate-969654: Invalid resource state for "": Permission denied while using the Eventarc Service Agent. If you recently started to use Eventarc, it may take a few minutes before all necessary permissions are propagated to the Service Agent. Otherwise, verify that it has Eventarc Service Agent role.
+!  functions: Since this is your first time using 2nd gen functions, we need a little bit longer to finish setting everything up. Retry the deployment in a few minutes.
+!  functions:  failed to create function projects/petsnaps-882dd/locations/us-central1/functions/onLikeCreate
+Failed to create function projects/petsnaps-882dd/locations/us-central1/functions/onLikeCreate
+!  functions: Request to https://cloudfunctions.googleapis.com/v2/projects/petsnaps-882dd/locations/us-central1/functions?functionId=onCommentCreate had HTTP Error: 400, Validation failed for trigger projects/petsnaps-882dd/locations/nam5/triggers/oncommentcreate-054626: Invalid resource state for "": Permission denied while using the Eventarc Service Agent. If you recently started to use Eventarc, it may take a few minutes before all necessary permissions are propagated to the Service Agent. Otherwise, verify that it has Eventarc Service Agent role.
+!  functions: Since this is your first time using 2nd gen functions, we need a little bit longer to finish setting everything up. Retry the deployment in a few minutes.
+!  functions:  failed to create function projects/petsnaps-882dd/locations/us-central1/functions/onCommentCreate
+Failed to create function projects/petsnaps-882dd/locations/us-central1/functions/onCommentCreate
+
+Functions deploy had errors with the following functions:
+        onCommentCreate(us-central1)
+        onFollowCreate(us-central1)
+        onLikeCreate(us-central1)
+Error: There was an error deploying functions:
+- Error Failed to create function onFollowCreate in region us-central1
+- Error Failed to create function onLikeCreate in region us-central1
+- Error Failed to create function onCommentCreate in region us-central1
+PS C:\Users\thuht\Petsnaps\functions>
+
+
+
 // functions/index.js (v2 syntax)
 
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
