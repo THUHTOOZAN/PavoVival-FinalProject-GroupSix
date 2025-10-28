@@ -1,3 +1,69 @@
+import { doc, setDoc, deleteDoc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+import { db } from "./firebase"; // adjust the path if needed
+
+// Follow someone
+export async function followUser(targetUid) {
+  const me = getAuth().currentUser?.uid;
+  if (!me) throw new Error("User not signed in");
+
+  const batch = writeBatch(db);
+
+  // Add me to target's followers
+  batch.set(doc(db, "follows", targetUid, "followers", me), {
+    createdAt: serverTimestamp(),
+  });
+
+  // Add target to my following
+  batch.set(doc(db, "follows", me, "following", targetUid), {
+    createdAt: serverTimestamp(),
+  });
+
+  await batch.commit();
+}
+
+// Unfollow someone
+export async function unfollowUser(targetUid) {
+  const me = getAuth().currentUser?.uid;
+  if (!me) throw new Error("User not signed in");
+
+  const batch = writeBatch(db);
+  batch.delete(doc(db, "follows", targetUid, "followers", me));
+  batch.delete(doc(db, "follows", me, "following", targetUid));
+  await batch.commit();
+}
+
+
+const [isFollowing, setIsFollowing] = useState(false);
+const auth = getAuth();
+const me = auth.currentUser?.uid;
+
+// Temporary simple follow button
+const handleFollow = async () => {
+  if (!profile?.uid) return;
+  try {
+    await followUser(profile.uid);
+    setIsFollowing(true);
+    alert("Followed!");
+  } catch (err) {
+    console.error("Follow error:", err);
+    alert(err.message);
+  }
+};
+
+const handleUnfollow = async () => {
+  if (!profile?.uid) return;
+  try {
+    await unfollowUser(profile.uid);
+    setIsFollowing(false);
+    alert("Unfollowed!");
+  } catch (err) {
+    console.error("Unfollow error:", err);
+    alert(err.message);
+  }
+};
+
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
