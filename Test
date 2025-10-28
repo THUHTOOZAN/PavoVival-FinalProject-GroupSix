@@ -1,3 +1,19 @@
+PROJECT_ID=petsnaps-882dd
+PROJECT_NUMBER=57585989255
+
+# Grant Eventarc Service Agent role
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-eventarc.iam.gserviceaccount.com" \
+  --role="roles/eventarc.serviceAgent"
+
+# Also grant Pub/Sub Publisher (often needed for Firestore triggers)
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-eventarc.iam.gserviceaccount.com" \
+  --role="roles/pubsub.publisher"
+
+
+
+
 PS C:\Users\thuht\Petsnaps\functions> firebase deploy --only functions
 
 === Deploying to 'petsnaps-882dd'...
