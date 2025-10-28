@@ -1,5 +1,208 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { db, storage } from "../firebase";
+import {
+  addDoc, collection, deleteDoc, doc, getCountFromServer, getDoc,
+  getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc
+} from "firebase/firestore";
+import { useAuth } from "../context/AuthContext";
+import { ref as sref, deleteObject } from "firebase/storage";
+
+export default function PostModal({ postId, onClose }) {
+  const { user } = useAuth();
+  const [post, setPost]     = useState(null);
+  const [comments, setComments] = useState([]);
+  const [myLiked, setMyLiked]   = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
+  const [newComment, setNewComment] = useState("");
+  const amOwner = user && post && user.uid === post.uid;
+
+  // --- live post
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "posts", postId), (snap) => {
+      setPost(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+    });
+    return unsub;
+  }, [postId]);
+
+  // --- live comments
+  useEffect(() => {
+    const q = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
+    const unsub = onSnapshot(q, (snap) =>
+      setComments(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    );
+    return unsub;
+  }, [postId]);
+
+  // --- my like + count
+  useEffect(() => {
+    if (!user) return;
+    const likeRef = doc(db, "posts", postId, "likes", user.uid);
+    getDoc(likeRef).then((s) => setMyLiked(s.exists()));
+    getCountFromServer(collection(db, "posts", postId, "likes"))
+      .then((r) => setLikeCount(r.data().count));
+  }, [postId, user]);
+
+  const images = useMemo(
+    () => (Array.isArray(post?.images) ? post.images.slice(0, 10) : []),
+    [post]
+  );
+
+  async function toggleLike() {
+    if (!user) return;
+    const likeRef = doc(db, "posts", postId, "likes", user.uid);
+    const s = await getDoc(likeRef);
+    if (s.exists()) {
+      await deleteDoc(likeRef);
+      setMyLiked(false);
+      setLikeCount((c) => Math.max(0, c - 1));
+    } else {
+      await setDoc(likeRef, { uid: user.uid, createdAt: serverTimestamp() });
+      setMyLiked(true);
+      setLikeCount((c) => c + 1);
+    }
+  }
+
+  async function addComment() {
+    if (!user || !newComment.trim()) return;
+    await addDoc(collection(db, "posts", postId, "comments"), {
+      text: newComment.trim(),
+      createdAt: serverTimestamp(),
+      author: {
+        uid: user.uid,
+        displayName: user.displayName || "",
+        photoURL: user.photoURL || "",
+      },
+    });
+    setNewComment("");
+  }
+
+  // 🔥 DELETE POST (owner only): removes comments, likes, images, then the post
+  async function deletePost() {
+    if (!amOwner || !post) return;
+    const ok = window.confirm("Delete this post? This cannot be undone.");
+    if (!ok) return;
+
+    try {
+      // 1) delete comments
+      const commentsSnap = await getDocs(collection(db, "posts", postId, "comments"));
+      await Promise.all(commentsSnap.docs.map((d) => deleteDoc(d.ref)));
+
+      // 2) delete likes
+      const likesSnap = await getDocs(collection(db, "posts", postId, "likes"));
+      await Promise.all(likesSnap.docs.map((d) => deleteDoc(d.ref)));
+
+      // 3) delete images from Storage (we stored download URLs)
+      const urls = Array.isArray(post.images) ? post.images : [];
+      await Promise.all(
+        urls.map(async (url) => {
+          try {
+            const r = sref(storage, url); // ref can take full https URL
+            await deleteObject(r);
+          } catch (_) {
+            // ignore corrupt/old URLs
+          }
+        })
+      );
+
+      // 4) delete the post document
+      await deleteDoc(doc(db, "posts", postId));
+
+      onClose?.();
+    } catch (err) {
+      console.error("Delete failed:", err);
+      alert("Could not delete post. Please try again.");
+    }
+  }
+
+  if (!post) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 bg-black/50 z-[999] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-3xl rounded-2xl overflow-hidden" onClick={(e)=>e.stopPropagation()}>
+        {/* header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <div className="font-semibold">{post.author?.displayName || "Post"}</div>
+          <div className="flex items-center gap-2">
+            {amOwner && (
+              <button
+                onClick={deletePost}
+                className="px-3 py-1 rounded-full bg-red-500 text-white text-sm"
+                title="Delete post"
+              >
+                Delete
+              </button>
+            )}
+            <button onClick={onClose} className="px-3 py-1 rounded-full border">Close</button>
+          </div>
+        </div>
+
+        {/* images */}
+        {images.length > 0 && (
+          <div className="w-full bg-[#000]/5">
+            <img
+              src={images[0]}
+              alt=""
+              className="w-full max-h-[60vh] object-contain bg-black/5"
+              onError={(e)=>{ e.currentTarget.src=""; e.currentTarget.style.display='none'; }}
+            />
+          </div>
+        )}
+
+        {/* body */}
+        <div className="p-4">
+          {post.text && <p className="mb-3 text-[#444]">{post.text}</p>}
+
+          <div className="flex items-center gap-4 mb-4">
+            <button
+              onClick={toggleLike}
+              className={`px-3 py-1 rounded-full border ${myLiked ? 'bg-[#E2B887] text-white' : 'bg-white text-[#8B6F47]'}`}
+            >
+              {myLiked ? "♥ Liked" : "♡ Like"}
+            </button>
+            <span className="text-[#8B6F47]/80">{likeCount} likes</span>
+          </div>
+
+          <div className="max-h-64 overflow-y-auto border-t pt-3 space-y-2">
+            {comments.length === 0 ? (
+              <div className="text-sm text-[#8B6F47]/60">No comments yet.</div>
+            ) : (
+              comments.map(c => (
+                <div key={c.id} className="text-sm">
+                  <b>{c.author?.displayName || "User"}:</b> {c.text}
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="mt-3 flex gap-2">
+            <input
+              value={newComment}
+              onChange={(e)=>setNewComment(e.target.value)}
+              placeholder="Add a comment…"
+              className="flex-1 border rounded-lg px-3 py-2"
+            />
+            <button onClick={addComment} className="px-3 py-2 rounded-lg bg-[#E2B887] text-white">
+              Post
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+
+
+
+
+
+
+
+
+import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { db } from "../firebase";
 import {
   addDoc, collection, doc, getDoc, getCountFromServer,
