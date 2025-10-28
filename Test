@@ -1,5 +1,226 @@
 rules_version = '2';
 service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // notifications/{userId}/items/{notifId}
+    match /notifications/{userId}/items/{notifId} {
+      allow list, get: if request.auth != null && request.auth.uid == userId;
+
+      // only allow changing 'isRead' from client
+      allow update: if request.auth != null
+                     && request.auth.uid == userId
+                     && request.resource.data.diff(resource.data).changedKeys().hasOnly(['isRead']);
+
+      // functions will create/delete (clients cannot)
+      allow create, delete: if false;
+    }
+
+    // keep your other rules...
+  }
+}
+
+........
+
+
+
+// functions/src/index.ts
+import * as functions from 'firebase-functions';
+import * as admin from 'firebase-admin';
+admin.initializeApp();
+const db = admin.firestore();
+const ts = admin.firestore.FieldValue.serverTimestamp;
+
+
+.........
+
+export const onFollowCreate = functions.firestore
+  .document('follows/{targetId}/followers/{actorId}')
+  .onCreate(async (snap, ctx) => {
+    const { targetId, actorId } = ctx.params as { targetId: string; actorId: string };
+    if (targetId === actorId) return;
+
+    const actor = await db.doc(`users/${actorId}`).get().catch(() => null);
+    const actorName = actor?.get('displayName') ?? 'Someone';
+    const actorAvatar = actor?.get('photoURL') ?? null;
+
+    const notifId = `follow:${actorId}`;              // one per follower
+    await db.collection('notifications').doc(targetId)
+      .collection('items').doc(notifId)
+      .set({
+        userId: targetId,
+        actor: { id: actorId, name: actorName, avatar: actorAvatar },
+        type: 'follow',
+        entity: { type: 'user', id: actorId },
+        message: `${actorName} started following you`,
+        url: `/user/${actorId}`,
+        isRead: false,
+        createdAt: ts(),
+      }, { merge: true });
+  });
+
+
+
+
+,.........
+
+
+
+
+export const onLikeCreate = functions.firestore
+  .document('posts/{postId}/likes/{actorId}')
+  .onCreate(async (snap, ctx) => {
+    const { postId, actorId } = ctx.params as { postId: string; actorId: string };
+
+    const [postSnap, actorSnap] = await Promise.all([
+      db.doc(`posts/${postId}`).get(),
+      db.doc(`users/${actorId}`).get().catch(() => null),
+    ]);
+    if (!postSnap.exists) return;
+
+    const postOwnerId = postSnap.get('author.uid') || postSnap.get('ownerId'); // pick your field
+    if (!postOwnerId || postOwnerId === actorId) return;
+
+    const actorName = actorSnap?.get('displayName') ?? 'Someone';
+    const actorAvatar = actorSnap?.get('photoURL') ?? null;
+
+    const notifId = `like:${postId}:${actorId}`;     // one like per user per post
+    await db.collection('notifications').doc(postOwnerId)
+      .collection('items').doc(notifId)
+      .set({
+        userId: postOwnerId,
+        actor: { id: actorId, name: actorName, avatar: actorAvatar },
+        type: 'like',
+        entity: { type: 'post', id: postId },
+        message: `${actorName} liked your post`,
+        url: `/post/${postId}`,
+        isRead: false,
+        createdAt: ts(),
+      }, { merge: true });
+  });
+
+
+
+.......
+
+
+export const onCommentCreate = functions.firestore
+  .document('posts/{postId}/comments/{commentId}')
+  .onCreate(async (snap, ctx) => {
+    const { postId } = ctx.params as { postId: string; commentId: string };
+    const c = snap.data() as any;                    // { actorId, text, ... }
+    const actorId = c.actorId || c.userId;
+
+    const [postSnap, actorSnap] = await Promise.all([
+      db.doc(`posts/${postId}`).get(),
+      db.doc(`users/${actorId}`).get().catch(() => null),
+    ]);
+    if (!postSnap.exists || !actorId) return;
+
+    const postOwnerId = postSnap.get('author.uid') || postSnap.get('ownerId');
+    if (!postOwnerId || postOwnerId === actorId) return;
+
+    const actorName = actorSnap?.get('displayName') ?? 'Someone';
+    const actorAvatar = actorSnap?.get('photoURL') ?? null;
+
+    const notifId = `comment:${postId}:${snap.id}`;  // every comment unique
+    await db.collection('notifications').doc(postOwnerId)
+      .collection('items').doc(notifId)
+      .set({
+        userId: postOwnerId,
+        actor: { id: actorId, name: actorName, avatar: actorAvatar },
+        type: 'comment',
+        entity: { type: 'post', id: postId },
+        message: `${actorName} commented on your post`,
+        url: `/post/${postId}#comment-${snap.id}`,
+        isRead: false,
+        createdAt: ts(),
+      }, { merge: true });
+  });
+
+
+
+......
+
+
+
+import { collection, query, orderBy, where, limit, onSnapshot } from 'firebase/firestore';
+import { db } from '@/firebase';
+import { getAuth } from 'firebase/auth';
+
+export function listenNotifications(onChange: (items:any[]) => void) {
+  const uid = getAuth().currentUser?.uid;
+  if (!uid) return () => {};
+
+  const q = query(
+    collection(db, `notifications/${uid}/items`),
+    orderBy('createdAt', 'desc'),
+    limit(20)
+  );
+
+  return onSnapshot(q, (snap) => {
+    const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    onChange(items);
+  });
+}
+
+
+
+........
+
+
+export function listenUnreadCount(onChange: (n:number) => void) {
+  const uid = getAuth().currentUser?.uid;
+  if (!uid) return () => {};
+
+  const q = query(
+    collection(db, `notifications/${uid}/items`),
+    where('isRead', '==', false)
+  );
+  return onSnapshot(q, (snap) => onChange(snap.size));
+}
+
+.......
+
+
+
+import { doc, updateDoc, writeBatch, getDocs, query, collection, where } from 'firebase/firestore';
+
+export async function markOneRead(uid: string, notifId: string) {
+  await updateDoc(doc(db, `notifications/${uid}/items/${notifId}`), { isRead: true });
+}
+
+export async function markAllRead(uid: string) {
+  const q = query(collection(db, `notifications/${uid}/items`), where('isRead','==', false));
+  const snap = await getDocs(q);
+  const batch = writeBatch(db);
+  snap.forEach(d => batch.update(d.ref, { isRead: true }));
+  await batch.commit();
+}
+
+
+
+.....
+
+
+
+function go(url?: string) {
+  if (!url) return;
+  try { new URL(url, window.location.origin); window.location.assign(url); }
+  catch { /* ignore invalid URL */ }
+}
+
+
+
+......
+
+
+
+
+
+
+
+rules_version = '2';
+service cloud.firestore {
   match /databases/{db}/documents {
 
     // ----- USERS (leave yours as-is if already working) -----
