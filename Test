@@ -2,6 +2,287 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import {
+  onSnapshot,
+  doc,
+  query,
+  collection,
+  where,
+  orderBy,
+} from "firebase/firestore";
+import { useAuth } from "../context/AuthContext";
+import FollowButton from "../components/FollowButton";
+import { useUserCounters } from "../hooks/useUserCounters";
+import PostModal from "../components/PostModal";
+
+export default function UserProfilePage() {
+  const { uid } = useParams(); // profile owner
+  const { user: me } = useAuth();
+  const nav = useNavigate();
+
+  const [profile, setProfile] = useState(null);
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedPostId, setSelectedPostId] = useState(null);
+
+  const { followersCount, followingCount } = useUserCounters(uid);
+  const viewingOwn = me?.uid === uid;
+  const name = useMemo(() => profile?.displayName || "User", [profile]);
+
+  // Real-time profile
+  useEffect(() => {
+    if (!uid) return;
+    const unsub = onSnapshot(doc(db, "users", uid), (snap) => {
+      setProfile(snap.exists() ? snap.data() : { displayName: "User" });
+    });
+    return unsub;
+  }, [uid]);
+
+  // Real-time posts
+  useEffect(() => {
+    if (!uid) return;
+    setLoading(true);
+    const q = query(
+      collection(db, "posts"),
+      where("uid", "==", uid),
+      orderBy("createdAt", "desc")
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    });
+    return unsub;
+  }, [uid]);
+
+  return (
+    <div className="min-h-[calc(100vh-80px)] bg-[#FFE7CC]">
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        {/* HEADER */}
+        <div className="bg-white/90 rounded-2xl shadow p-6 flex items-center gap-5">
+          <img
+            src={profile?.photoURL || "/default-avatar.png"}
+            alt=""
+            className="w-20 h-20 rounded-full object-cover border"
+          />
+
+          <div className="flex-1">
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold text-[#8B6F47]">{name}</h1>
+
+              {viewingOwn ? (
+                <>
+                  <button
+                    onClick={() => nav("/add-post")}
+                    className="px-3 py-1.5 rounded-full bg-[#E2C299] text-white text-sm"
+                  >
+                    Create post
+                  </button>
+                  <button
+                    onClick={() => nav("/settings")}
+                    className="px-3 py-1.5 rounded-full bg-white border border-[#E2B887]/60 text-[#8B6F47] text-sm"
+                  >
+                    Edit profile
+                  </button>
+                </>
+              ) : (
+                <>
+                  <FollowButton
+                    me={{ uid: me?.uid, displayName: me?.displayName, photoURL: me?.photoURL }}
+                    target={{ uid, displayName: profile?.displayName, photoURL: profile?.photoURL }}
+                  />
+                  <button
+                    onClick={() => nav("/chat")}
+                    className="px-3 py-1.5 rounded-full bg-[#FFE7CC] border border-[#E2B887]/60 text-[#8B6F47] text-sm"
+                  >
+                    Message
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div className="mt-1 flex gap-6 text-[#8B6F47]">
+              <span><b>{posts.length}</b> posts</span>
+              <span><b>{followersCount}</b> followers</span>
+              <span><b>{followingCount}</b> following</span>
+            </div>
+
+            {profile?.bio && (
+              <p className="mt-2 text-[#8B6F47]/80">{profile.bio}</p>
+            )}
+          </div>
+        </div>
+
+        {/* POSTS GRID */}
+        <div className="mt-6 grid grid-cols-2 md:grid-cols-3 gap-4">
+          {loading ? (
+            [...Array(6)].map((_, i) => (
+              <div
+                key={i}
+                className="aspect-square rounded-xl bg-[#f2e7d9] animate-pulse"
+              />
+            ))
+          ) : posts.length === 0 ? (
+            <div className="col-span-full text-center text-[#8B6F47]/70">
+              No posts yet.
+            </div>
+          ) : (
+            posts.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setSelectedPostId(p.id)}
+                className="relative block bg-white/90 rounded-xl shadow overflow-hidden text-left"
+              >
+                {Array.isArray(p.images) && p.images[0] ? (
+                  <img
+                    src={p.images[0]}
+                    alt=""
+                    className="w-full aspect-square object-cover"
+                  />
+                ) : (
+                  <div className="w-full aspect-square bg-[#F5F5F5]" />
+                )}
+                {p.text && (
+                  <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-xs px-2 py-1 pointer-events-none line-clamp-1">
+                    {p.text}
+                  </div>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      {selectedPostId && (
+        <PostModal postId={selectedPostId} onClose={() => setSelectedPostId(null)} />
+      )}
+    </div>
+  );
+}
+
+
+
+
+....
+
+
+
+
+import React, { useEffect, useState } from "react";
+import { db } from "../firebase";
+import { doc, onSnapshot, deleteDoc } from "firebase/firestore";
+import { useAuth } from "../context/AuthContext";
+
+export default function PostModal({ postId, onClose }) {
+  const { user } = useAuth();
+  const [post, setPost] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!postId) return;
+    const unsub = onSnapshot(doc(db, "posts", postId), (snap) => {
+      setPost({ id: snap.id, ...snap.data() });
+      setLoading(false);
+    });
+    return unsub;
+  }, [postId]);
+
+  if (loading)
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
+        <div className="bg-white p-4 rounded-xl">Loading post...</div>
+      </div>
+    );
+
+  if (!post) return null;
+
+  async function handleDelete() {
+    if (window.confirm("Delete this post?")) {
+      await deleteDoc(doc(db, "posts", post.id));
+      onClose();
+    }
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white rounded-2xl shadow-lg max-w-lg w-full overflow-hidden"
+      >
+        {Array.isArray(post.images) && post.images.length > 0 && (
+          <img
+            src={post.images[0]}
+            alt=""
+            className="w-full max-h-[400px] object-cover"
+          />
+        )}
+
+        <div className="p-4 text-[#8B6F47]">
+          <p className="mb-3">{post.text || "(no caption)"}</p>
+
+          {user?.uid === post.uid && (
+            <button
+              onClick={handleDelete}
+              className="px-3 py-1.5 rounded-full bg-red-500 text-white text-sm"
+            >
+              Delete post
+            </button>
+          )}
+
+          <button
+            onClick={onClose}
+            className="ml-2 px-3 py-1.5 rounded-full bg-gray-200 text-gray-700 text-sm"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+.....
+
+
+import { initializeApp, getApps } from "firebase/app";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentSingleTabManager,
+} from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+import { getStorage } from "firebase/storage";
+
+const firebaseConfig = {
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID,
+};
+
+const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentSingleTabManager(),
+  }),
+});
+export const auth = getAuth(app);
+export const storage = getStorage(app);
+
+
+.......
+
+
+
+import React, { useEffect, useMemo, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { db } from "../firebase";
+import {
   onSnapshot, doc, getDoc, query, collection, where, orderBy
 } from "firebase/firestore";
 import { useAuth } from "../context/AuthContext";
