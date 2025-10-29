@@ -1,3 +1,206 @@
+/* index.css – monochrome + white neon glow (student-friendly) */
+
+:root{
+  /* core palette (no color, just b/w) */
+  --bg: #0a0a0a;          /* page background (almost black) */
+  --panel: #111214;       /* cards/panels */
+  --panel-2:#0e0f12;
+  --text: #f2f2f2;        /* main text (bright!) */
+  --muted:#b6b6b6;        /* secondary text (still readable) */
+  --line:#27292f;         /* thin lines / borders */
+
+  /* keep these names so old CSS still works, but make them WHITE */
+  --neon:#ffffff;         /* white neon */
+  --neon2:#ffffff;        /* also white */
+  /* glow stack tuned for readability (not crazy bright) */
+  --glow: 0 0 6px rgba(255,255,255,.35), 0 0 14px rgba(255,255,255,.25);
+  --glow-strong: 0 0 10px rgba(255,255,255,.55), 0 0 22px rgba(255,255,255,.35);
+
+  --danger:#ff4d4d;       /* delete icon can stay red so it stands out */
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: radial-gradient(1200px 800px at 50% -10%, #14151a 0%, var(--bg) 45%, #070709 100%);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* shell */
+.app-shell { max-width: 980px; margin: 24px auto 48px; padding: 0 16px; }
+
+/* title */
+.neon-title {
+  display: flex; gap: 12px; align-items: baseline;
+  font-size: 28px; letter-spacing: 1px; text-transform: lowercase;
+  text-shadow: var(--glow);
+}
+.neon-title .tiny { font-size: 14px; color: var(--muted); text-shadow: none; }
+
+/* controls */
+.controls .row { display: flex; gap: 8px; margin: 16px 0 10px; flex-wrap: wrap; }
+
+.btn {
+  background: #121316;
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,.25);
+  padding: 8px 12px;
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: .5px;
+  box-shadow: var(--glow);
+  transition: transform .05s ease-in-out, box-shadow .18s, border-color .18s;
+  image-rendering: pixelated;
+}
+.btn:hover   { transform: translateY(-1px); box-shadow: var(--glow-strong); border-color: rgba(255,255,255,.55); }
+.btn:active  { transform: translateY(0); }
+.btn.primary { border-color: rgba(255,255,255,.55); box-shadow: var(--glow-strong); }
+
+.icon-btn {
+  background: #121316;
+  border: 1px solid rgba(255,255,255,.2);
+  color: var(--text);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.icon-btn:hover { border-color: rgba(255,255,255,.6); box-shadow: 0 0 8px rgba(255,255,255,.35); }
+.icon-btn.danger { border-color: var(--danger); color: var(--danger); }
+
+/* calendar container */
+.calendar {
+  border: 1px solid rgba(255,255,255,.35);
+  border-radius: 8px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+  box-shadow: var(--glow);
+}
+
+/* weekday header */
+.week-header {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 6px; margin-bottom: 6px;
+}
+.weekday {
+  text-align: center; font-size: 12px; color: var(--muted);
+  border-bottom: 1px dashed var(--line); padding-bottom: 6px;
+}
+
+/* grid of days */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.day {
+  background: var(--panel);
+  min-height: 96px;      /* a bit taller + readable in bright places */
+  border: 1px solid #1f222b;
+  border-radius: 6px;
+  padding: 8px;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+.day:hover {
+  border-color: rgba(255,255,255,.65);
+  box-shadow: 0 0 10px rgba(255,255,255,.35);
+}
+.day.muted { opacity: .62; }           /* outside month but still readable */
+.day.has { outline: 1px dashed rgba(255,255,255,.45); }
+
+/* day number is larger + high contrast */
+.day-number {
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: .2px;
+  color: #fff;
+  opacity: .95;
+}
+
+/* small event chips */
+.chips {
+  margin-top: 10px; display: flex; gap: 4px; flex-wrap: wrap;
+}
+.chip {
+  font-size: 11px; padding: 2px 6px;
+  border: 1px solid rgba(255,255,255,.35);
+  border-radius: 4px;
+  background: rgba(255,255,255,.06);
+  color: #eee;
+  white-space: nowrap; text-overflow: ellipsis; overflow: hidden;
+  max-width: 100%;
+}
+.chip.more {
+  border-style: dashed; background: rgba(255,255,255,.09);
+}
+
+/* modal */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,.65);
+  display: grid; place-items: center; padding: 16px; z-index: 1000;
+}
+.modal {
+  width: min(720px, 100%);
+  background: var(--panel-2);
+  border: 1px solid rgba(255,255,255,.45);
+  border-radius: 10px;
+  box-shadow: var(--glow-strong);
+  padding: 12px;
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.modal-title { margin: 0; font-weight: 800; letter-spacing: .5px; text-shadow: var(--glow); }
+
+/* form */
+.event-form { display: grid; gap: 10px; margin: 8px 0 12px; }
+.field { display: grid; gap: 6px; }
+.field > span { font-size: 12px; color: var(--muted); }
+.field input, .field textarea {
+  background: #0d0f13;
+  color: var(--text);
+  border: 1px solid #232633;
+  border-radius: 6px;
+  padding: 10px 12px;
+  outline: none;
+}
+.field input:focus, .field textarea:focus {
+  border-color: rgba(255,255,255,.65);
+  box-shadow: 0 0 10px rgba(255,255,255,.35);
+}
+
+/* event list */
+.list { display: grid; gap: 8px; }
+.item {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 8px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: #0c0e12;
+}
+.bullet {
+  width: 10px; height: 10px; margin-top: 6px;
+  border: 1px solid rgba(255,255,255,.65);
+  box-shadow: var(--glow);
+}
+.grow { flex: 1; min-width: 0; }
+.title { font-weight: 700; font-size: 14px; color: #fff; }
+.notes { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+/* small screens */
+@media (max-width: 640px) {
+  .day { min-height: 78px; }
+  .neon-title { font-size: 22px; }
+}
+
+
+
+
 # make a new vite react app
 npm create vite@latest calendar-student -- --template react
 cd calendar-student
