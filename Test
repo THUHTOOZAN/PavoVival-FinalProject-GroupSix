@@ -1,3 +1,97 @@
+// components/Calendar.jsx
+// fixed version: correct starting weekday and full 6x7 grid alignment
+
+import React, { useMemo } from "react";
+
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+
+function ymd(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+export default function Calendar({ year, month, events, onOpenDay }) {
+  // Correct month logic
+  const cells = useMemo(() => {
+    // 1️⃣ Get first day of the month
+    const firstOfMonth = new Date(year, month, 1);
+
+    // 2️⃣ Find which day of week that is (0=Sun, 6=Sat)
+    const firstWeekday = firstOfMonth.getDay();
+
+    // 3️⃣ Calculate start date for the calendar grid
+    // We go back to the previous Sunday (or same day if it's already Sunday)
+    const startDate = new Date(firstOfMonth);
+    startDate.setDate(firstOfMonth.getDate() - firstWeekday);
+
+    // 4️⃣ Fill 42 days (6 weeks × 7 days)
+    const days = [];
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + i);
+      days.push(d);
+    }
+
+    return days;
+  }, [year, month]);
+
+  return (
+    <section className="calendar">
+      <div className="week-header">
+        {WEEKDAYS.map((d) => (
+          <div key={d} className="weekday">
+            {d}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid">
+        {cells.map((dateObj) => {
+          const inMonth = dateObj.getMonth() === month;
+          const dateStr = ymd(dateObj);
+          const dayNum = dateObj.getDate();
+          const hasEvents = events[dateStr]?.length > 0;
+
+          return (
+            <button
+              key={dateStr}
+              className={`day ${inMonth ? "" : "muted"} ${hasEvents ? "has" : ""}`}
+              onClick={() => onOpenDay(dateObj)}
+              title={inMonth ? "add/view events" : "outside current month"}
+            >
+              <div className="day-number">{dayNum}</div>
+
+              <div className="chips">
+                {(events[dateStr] ?? []).slice(0, 2).map((e) => (
+                  <span key={e.id} className="chip">
+                    {e.time ? e.time : "•"} {e.title.slice(0, 8)}
+                  </span>
+                ))}
+                {(events[dateStr]?.length ?? 0) > 2 && (
+                  <span className="chip more">
+                    +{events[dateStr].length - 2}
+                  </span>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+
+
+
+
+
+
+
+
 /* index.css – monochrome + white neon glow (student-friendly) */
 
 :root{
