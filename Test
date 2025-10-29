@@ -1,4 +1,102 @@
 // components/Calendar.jsx
+// final fixed version: correct real-world calendar alignment
+
+import React, { useMemo } from "react";
+
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+function ymd(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+export default function Calendar({ year, month, events, onOpenDay }) {
+  const days = useMemo(() => {
+    // 1️⃣ find first day of this month
+    const firstDayOfMonth = new Date(year, month, 1);
+    // 2️⃣ find last day of this month
+    const lastDayOfMonth = new Date(year, month + 1, 0);
+
+    // 3️⃣ find which weekday month starts on (0=Sun,...6=Sat)
+    const startWeekday = firstDayOfMonth.getDay();
+
+    // 4️⃣ find total days in month
+    const totalDays = lastDayOfMonth.getDate();
+
+    // 5️⃣ start grid from the Sunday before the first day
+    const startDate = new Date(year, month, 1 - startWeekday);
+
+    // 6️⃣ fill full 6×7 = 42 cells
+    const arr = [];
+    for (let i = 0; i < 42; i++) {
+      const current = new Date(startDate);
+      current.setDate(startDate.getDate() + i);
+      arr.push(current);
+    }
+
+    return arr;
+  }, [year, month]);
+
+  return (
+    <section className="calendar">
+      <div className="week-header">
+        {WEEKDAYS.map((d) => (
+          <div key={d} className="weekday">
+            {d}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid">
+        {days.map((dateObj) => {
+          const dateStr = ymd(dateObj);
+          const inMonth = dateObj.getMonth() === month;
+          const dayNum = dateObj.getDate();
+          const hasEvents = events[dateStr]?.length > 0;
+
+          return (
+            <button
+              key={dateStr}
+              className={`day ${inMonth ? "" : "muted"} ${hasEvents ? "has" : ""}`}
+              onClick={() => onOpenDay(dateObj)}
+              title={inMonth ? "add/view events" : "outside current month"}
+            >
+              <div className="day-number">{dayNum}</div>
+
+              {/* show event chips */}
+              <div className="chips">
+                {(events[dateStr] ?? []).slice(0, 2).map((e) => (
+                  <span key={e.id} className="chip">
+                    {e.time ? e.time : "•"} {e.title.slice(0, 8)}
+                  </span>
+                ))}
+                {(events[dateStr]?.length ?? 0) > 2 && (
+                  <span className="chip more">
+                    +{events[dateStr].length - 2}
+                  </span>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+
+
+..........
+
+
+
+
+
+
+
+// components/Calendar.jsx
 // fixed version: correct starting weekday and full 6x7 grid alignment
 
 import React, { useMemo } from "react";
